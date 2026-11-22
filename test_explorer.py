@@ -13,7 +13,7 @@ import main
 
 app = QApplication.instance() or QApplication([])
 app.setStyle("Fusion")
-app.setStyleSheet(main.STYLE)
+app.setStyleSheet(main.stylesheet.STYLE)
 
 def wait_for(fn, seconds=8):
     deadline = time.monotonic() + seconds
@@ -136,6 +136,62 @@ class ExplorerTest(unittest.TestCase):
                 w.close()
                 w.pool.waitForDone(5000)
                 app.processEvents()
+
+    def test_portable_settings_and_panel_module(self):
+        import panels
+        from PySide6.QtCore import QSettings
+        self.assertIs(main.Files, panels.Files)
+        self.assertIs(main.PaneFilter, panels.PaneFilter)
+        self.assertIs(main.FileView, panels.FileView)
+        self.assertIs(main.PreviewLabel, panels.PreviewLabel)
+        self.assertIs(main.create_table_pane, panels.create_table_pane)
+        self.assertTrue(main.SETTINGS_PATH.is_absolute())
+        self.assertEqual(main.SETTINGS_PATH.name, "settings.ini")
+        old_name = main.NETWORK_TRASH
+        self.addCleanup(setattr, main, "NETWORK_TRASH", old_name)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ini = QSettings(str(root / "preferences.ini"), QSettings.IniFormat)
+            ini.setValue("app/name", "My Custom Explorer")
+            ini.setValue("cache/sqlite_path", "data/cache.sqlite3")
+            ini.setValue("network/trash_name", ".CustomRecycle")
+            ini.setValue("pane/0/mode", "images")
+            ini.setValue("pane/1/mode", "all")
+            ini.sync()
+            self.assertEqual(main.configured_cache_path(ini),
+                             (main.SETTINGS_PATH.parent / "data" / "cache.sqlite3").resolve())
+            self.assertTrue(main.configured_cache_path(ini).is_absolute())
+            self.assertRaises(ValueError, lambda: (
+                ini.setValue("network/trash_name", "../escape"),
+                main.configure_network_trash(ini)
+            ))
+            ini.setValue("network/trash_name", ".CustomRecycle")
+            main.configure_network_trash(ini)
+            self.assertEqual(main.NETWORK_TRASH, ".CustomRecycle")
+            self.assertIn(".customrecycle", main.folder_sizes.EXCLUDED)
+            self.assertIn(".customrecycle", main.duplicates.SKIP_DIRS)
+            a = root / "data.bin"
+            a.write_bytes(b"abc")
+            with patch.object(main, "network_root", return_value=root):
+                self.assertFalse(main.recycle([str(a)]))
+            self.assertFalse(a.exists())
+            self.assertEqual(main.share_trash_entries(root)[0][1], "data.bin")
+            main.restore_share_item(root, main.share_trash_entries(root)[0][2])
+            self.assertEqual(a.read_bytes(), b"abc")
+            # Supply the custom settings to the Explorer under test without
+            # modifying the actual per-user INI or Windows registry.
+            with patch.object(main, "open_settings", return_value=ini):
+                w = main.Explorer()
+                w.show()
+                try:
+                    wait_for(lambda: not w.workers)
+                    self.assertEqual(w.windowTitle(), "My Custom Explorer")
+                    self.assertEqual(w.size_db, main.configured_cache_path(ini))
+                    self.assertEqual([p.mode for p in w.proxies], ["images", "all"])
+                finally:
+                    w.close()
+                    w.pool.waitForDone(5000)
+                    app.processEvents()
 
     def test_external_filter_definitions(self):
         import filters

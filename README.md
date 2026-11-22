@@ -47,3 +47,19 @@ SHA duplicate browsing uses exact byte-size buckets, three 64 KiB samples for la
 
 ZIP / folder matches defaults to alphabetical order without grouping by type. Its context menu offers Recycle matching ZIPs - keep folders, which re-verifies each currently listed pair with fresh SHA-256 checks, reuses the last successful ZIP password and prompts when needed. Only the archive is recycled; skipped, mismatched or unverified pairs are retained. Ordinary SHA duplicate cleanup remains separate. The matching view is refreshed after cleanup.
 \nDouble-click files to rename inline (the filename stem is preselected). Enter commits and starts renaming the next file in the original visible order; Escape or focus loss ends the sequence. Existing names are never overwritten. Folders still open with double-click, and files can be opened via right-click Open or Enter when not editing. The Image preview toolbar button (Alt+P) opens a resizable fourth panel. It previews the selected image only, debounces selection changes, bounds the decoded preview size, and releases the image and cancels pending work when hidden. No thumbnail scan is performed. Supported formats depend on installed Qt image plugins.\n
+## Portable configuration and pane module
+
+The explorer reads and writes settings.ini beside main.py, not the Windows registry.
+A first run copies any missing old registry settings and initializes defaults.
+See settings.example.ini for the editable [app] name, [cache] sqlite_path,
+and [network] trash_name options. Auto SQLite uses each machine's local
+%LOCALAPPDATA%/TriExplorer/folder-sizes.sqlite3 (the SHA cache shares this DB).
+Relative SQLite paths resolve against the application folder, not the PyCharm
+working directory. Network trash is a single folder name at the root of each
+SMB share; changing it does not move prior recycled items.
+
+panels.py owns the file-row model, filter proxy, table widget, inline rename
+field, image-preview label, and create_table_pane factory. filters.py is
+the single source of view presets and file-extension categories. main.py
+coordinates navigation, filesystem operations, and background work.
+Local settings.ini is intentionally gitignored; settings.example.ini is versioned.

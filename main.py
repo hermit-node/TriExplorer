@@ -30,39 +30,72 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                QAbstractItemView, QToolButton, QLineEdit, QLabel, QMenu, QMessageBox,
                                QInputDialog, QStyle, QFrame, QFileDialog, QComboBox, QSizePolicy)
 
+import stylesheet
 from filters import PANE_MODES, CATEGORY_SUFFIXES, ARCHIVE_SUFFIXES, archive_name
+from panels import (
+    PC, PATH_ROLE, SORT_ROLE, LOADED_ROLE, Entry, normalized, readable_size,
+    Files, PaneFilter, RenameEdit, PreviewLabel, FileView, read_image_preview,
+    create_table_pane,
+)
 
 APP = "TriExplorer"
-PC = ""
-PATH_ROLE = Qt.ItemDataRole.UserRole
-SORT_ROLE = int(PATH_ROLE) + 1
-LOADED_ROLE = int(PATH_ROLE) + 2
+SETTINGS_PATH = Path(__file__).resolve().with_name("settings.ini")
+
+DEFAULT_CONFIG = {
+    "app/name": "TriExplorer",
+    "cache/sqlite_path": "auto",
+    "network/trash_name": ".TriExplorer-Recycle",
+    "hidden": False,
+    "preview_open": False,
+    "preview_width": 340,
+    "pane/0/mode": "default",
+    "pane/0/sort_column": 0,
+    "pane/0/descending": False,
+    "pane/1/mode": "archives",
+    "pane/1/sort_column": 0,
+    "pane/1/descending": False,
+}
 
 
-def normalized(path):
-    return os.path.normcase(os.path.normpath(path)) if path else PC
+def open_settings():
+    """Load portable settings.ini; import any missing legacy registry preferences once."""
+    settings = QSettings(str(SETTINGS_PATH), QSettings.IniFormat)
+    if not settings.value("meta/legacy_imported", False, type=bool):
+        legacy = QSettings("KHzz", APP)
+        for key in legacy.allKeys():
+            if not settings.contains(key):
+                settings.setValue(key, legacy.value(key))
+        settings.setValue("meta/legacy_imported", True)
+    for key, value in DEFAULT_CONFIG.items():
+        if not settings.contains(key):
+            settings.setValue(key, value)
+    settings.sync()
+    return settings
 
 
+def configured_cache_path(settings):
+    """Auto uses machine-local SQLite; explicit paths may contain environment variables."""
+    raw = str(settings.value("cache/sqlite_path", "auto", type=str)).strip()
+    if not raw or raw.casefold() == "auto":
+        return folder_sizes.cache_path()
+    expanded = Path(os.path.expandvars(os.path.expanduser(raw)))
+    if not expanded.is_absolute():
+        expanded = SETTINGS_PATH.parent / expanded
+    return expanded.resolve()
 
-def readable_size(n):
-    if n is None:
-        return ""
-    value = float(n)
-    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
-        if value < 1024 or unit == "PB":
-            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024
 
+def configure_network_trash(settings):
+    """Recycle directory is a safe single name under each SMB share's root."""
+    global NETWORK_TRASH
+    name = str(settings.value("network/trash_name", NETWORK_TRASH, type=str)).strip()
+    if (not valid_name(name) or name in (".", "..")
+            or "/" in name or chr(92) in name
+            or getattr(os.path, "isreserved", lambda _: False)(name)):
+        raise ValueError("network/trash_name must be a single safe directory name")
+    NETWORK_TRASH = name
+    folder_sizes.EXCLUDED.add(name.casefold())
+    duplicates.SKIP_DIRS.add(name.casefold())
 
-@dataclass(frozen=True)
-class Entry:
-    path: str
-    name: str
-    folder: bool
-    archive: bool = False
-    size: int | None = None
-    modified: float | None = None
-    hidden: bool = False
 
 
 def scan(path):
@@ -112,306 +145,16 @@ class Worker(QRunnable):
             self.signals.finished.emit(result, None)
 
 
-class Files(QAbstractTableModel):
-    headers = ("Name", "Size", "Type", "Modified")
-
-    def __init__(self, icons, parent=None):
-        super().__init__(parent)
-        self.entries = []
-        self.icons = icons
-        self.folder_sizes = {}
-        self.archive_notes = {}
-
-    def replace(self, entries, sizes=None):
-        self.beginResetModel()
-        self.entries = entries
-        self.folder_sizes = sizes or {}
-        self.endResetModel()
-
-    def set_folder_size(self, path, size):
-        self.folder_sizes[path] = size
-        for row, entry in enumerate(self.entries):
-            if entry.folder and normalized(entry.path) == path:
-                index = self.index(row, 1)
-                self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.ToolTipRole, SORT_ROLE])
-                break
-
-    def rowCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else len(self.entries)
-
-    def columnCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else 4
-
-    def headerData(self, section, orientation, role=Qt.DisplayRole):
-        if orientation == Qt.Horizontal and role == Qt.DisplayRole:
-            return self.headers[section]
-
-    def entry(self, index):
-        return self.entries[index.row()] if index.isValid() else None
-
-    def data(self, index, role=Qt.DisplayRole):
-        e = self.entry(index)
-        if e is None:
-            return None
-        col = index.column()
-        cached = self.folder_sizes.get(normalized(e.path)) if e.folder else None
-        size = cached.size if cached is not None else e.size
-        kind = "Folder" if e.folder else ("Archive" if e.archive else (
-                Path(e.name).suffix[1:].upper() or "File"))
-        if role == PATH_ROLE:
-            return e.path
-        if role == SORT_ROLE:
-            return (e.name.casefold(), size if size is not None else -1,
-                    kind.casefold(), e.modified if e.modified is not None else -1)[col]
-        if role == Qt.DecorationRole and col == 0:
-            return self.icons["folder" if e.folder else "archive" if e.archive else "file"]
-        if role == Qt.ToolTipRole:
-            if e.folder and col == 1:
-                if cached is None:
-                    return "Folder size not calculated"
-                stamp = datetime.fromtimestamp(cached.checked).strftime("%Y-%m-%d %H:%M")
-                return f"{cached.size:,} bytes (logical total)\nCalculated: {stamp}" + (
-                    "\nCached value may be stale" if cached.stale else "")
-            note = self.archive_notes.get(normalized(e.path))
-            return e.path + ("\n" + note if note else "")
-        if role == Qt.TextAlignmentRole and col == 1:
-            return int(Qt.AlignRight | Qt.AlignVCenter)
-        if role == Qt.DisplayRole:
-            date = datetime.fromtimestamp(e.modified).strftime("%Y-%m-%d  %H:%M") if e.modified is not None else ""
-            return (e.name, ("~" if cached and cached.stale else "") + readable_size(size), kind, date)[col]
-
-    def flags(self, index):
-        return super().flags(index) | (Qt.ItemIsDragEnabled if index.isValid() else Qt.NoItemFlags)
-
-    def mimeTypes(self):
-        return ["text/uri-list"]
-
-    def mimeData(self, indexes):
-        mime = QMimeData()
-        mime.setUrls([QUrl.fromLocalFile(self.entries[r].path)
-                      for r in sorted({i.row() for i in indexes})])
-        return mime
-
-    def supportedDragActions(self):
-        return Qt.CopyAction | Qt.MoveAction
 
 
-class PaneFilter(QSortFilterProxyModel):
-    def __init__(self, mode, parent=None):
-        super().__init__(parent)
-        self.mode = ("archives" if mode else "default") if isinstance(mode, bool) else mode
-        self.query = ""
-        self.duplicate_paths = set()
-        self.archive_match_paths = set()
-        self.hidden = False
-        self.setDynamicSortFilter(True)
-        self.setSortRole(SORT_ROLE)
-
-    @property
-    def archives(self):
-        return self.mode == "archives"
-
-    def set_mode(self, mode):
-        if mode not in dict(PANE_MODES):
-            mode = "default"
-        if self.mode != mode:
-            self.mode = mode
-            self.invalidate()
-
-    def filterAcceptsRow(self, row, parent):
-        e = self.sourceModel().entries[row]
-        if (not self.hidden and e.hidden) or self.query not in e.name.casefold():
-            return False
-        mode = self.mode
-        if mode in ("all", "alphabetical"):
-            return True
-        if mode == "duplicates":
-            return not e.folder and normalized(e.path) in self.duplicate_paths
-        if mode == "archive_matches":
-            return normalized(e.path) in self.archive_match_paths
-        if mode == "default":
-            return not e.archive
-        if mode == "folders":
-            return e.folder
-        if mode == "files":
-            return not e.folder
-        if mode == "archives":
-            return e.archive
-        return not e.folder and not e.archive and os.path.splitext(e.name.casefold())[1] in CATEGORY_SUFFIXES.get(mode,
-                                                                                                                  ())
-
-    def lessThan(self, left, right):
-        a = self.sourceModel().entry(left)
-        b = self.sourceModel().entry(right)
-        if self.mode not in ("alphabetical", "archive_matches") and a.folder != b.folder:
-            return a.folder if self.sortOrder() == Qt.AscendingOrder else b.folder
-        return super().lessThan(left, right)
 
 
-class RenameEdit(QLineEdit):
-    commit_name = Signal()
-    cancel_name = Signal()
-
-    def event(self, event):
-        if event.type() == QEvent.ShortcutOverride and event.key() in (Qt.Key_Return, Qt.Key_Enter, Qt.Key_Escape):
-            event.accept()
-            return True
-        return super().event(event)
-
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-            self.commit_name.emit()
-            event.accept()
-        elif event.key() == Qt.Key_Escape:
-            self.cancel_name.emit()
-            event.accept()
-        else:
-            super().keyPressEvent(event)
-
-    def focusOutEvent(self, event):
-        super().focusOutEvent(event)
-        self.cancel_name.emit()
 
 
-def read_image_preview(path, cancelled):
-    if cancelled():
-        return None
-    reader = QImageReader(path)
-    reader.setAutoTransform(True)
-    original = reader.size()
-    if not original.isValid():
-        raise ValueError(reader.errorString() or "Unsupported image format")
-    # Some plugins must decode the whole image before scaling. Bound both input
-    # dimensions and the retained image; never use a full-resolution pixmap.
-    if original.width() * original.height() > 80_000_000:
-        raise ValueError("Image too large for preview (80 megapixel limit)")
-    scaled = original.scaled(QSize(1400, 1400), Qt.KeepAspectRatio)
-    if original.width() > 1400 or original.height() > 1400:
-        reader.setScaledSize(scaled)
-    if cancelled():
-        return None
-    image = reader.read()
-    if cancelled():
-        return None
-    if image.isNull():
-        raise ValueError(reader.errorString() or "Unable to decode image")
-    if image.width() > 1400 or image.height() > 1400:
-        image = image.scaled(QSize(1400, 1400), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-    return image, original
 
 
-class PreviewLabel(QLabel):
-    def __init__(self):
-        super().__init__("Select an image")
-        self.setAlignment(Qt.AlignCenter)
-        self.setWordWrap(True)
-        self.setMinimumSize(0, 0)
-        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
-        self.source = None
-
-    def reset(self, message):
-        self.source = None
-        self.clear()
-        self.setText(message)
-
-    def set_image(self, image):
-        self.source = QPixmap.fromImage(image)
-        self.fit()
-
-    def fit(self):
-        if self.source is not None and not self.source.isNull():
-            size = self.contentsRect().size()
-            if size.width() > 0 and size.height() > 0:
-                self.setPixmap(self.source.scaled(size, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-
-    def resizeEvent(self, event):
-        super().resizeEvent(event)
-        self.fit()
 
 
-class FileView(QTreeView):
-    dropped = Signal(list, str, bool)
-    archive_dropped = Signal(list, str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setRootIsDecorated(False)
-        self.setItemsExpandable(False)
-        self.setUniformRowHeights(True)
-        self.setAlternatingRowColors(True)
-        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
-        self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
-        self.setDragDropMode(QAbstractItemView.DragDrop)
-        self.setDropIndicatorShown(False)
-        self.setSortingEnabled(True)
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.setTextElideMode(Qt.ElideMiddle)
-
-    def startDrag(self, supported):
-        indexes = self.selectionModel().selectedRows()
-        if indexes and all(os.path.dirname(i.data(PATH_ROLE)) != i.data(PATH_ROLE) for i in indexes):
-            drag = QDrag(self)
-            drag.setMimeData(self.model().mimeData(indexes))
-            drag.exec(Qt.CopyAction | Qt.MoveAction, Qt.CopyAction)
-
-    def cross_pane_entries(self, event):
-        source = event.source()
-        if not isinstance(source, FileView) or source is self:
-            return []
-        paths = {normalized(u.toLocalFile()) for u in event.mimeData().urls() if u.isLocalFile()}
-        if not paths:
-            return []
-        selected = [source.model().sourceModel().entry(source.model().mapToSource(i))
-                    for i in source.selectionModel().selectedRows()]
-        if {normalized(e.path) for e in selected if e} == paths:
-            return [e for e in selected if e]
-        matched = [e for e in source.model().sourceModel().entries if normalized(e.path) in paths]
-        return matched if len(matched) == len(paths) else []
-
-    def is_archive_drop(self, event):
-        entries = self.cross_pane_entries(event)
-        return bool(entries and all(e.archive for e in entries))
-
-    def dragEnterEvent(self, event):
-        entries = self.cross_pane_entries(event)
-        if any(e.archive for e in entries) and not all(e.archive for e in entries):
-            event.ignore()
-            return
-        if entries and all(e.archive for e in entries) and event.mimeData().hasUrls():
-            event.setDropAction(Qt.CopyAction)
-            event.accept()
-        elif event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            event.ignore()
-
-    dragMoveEvent = dragEnterEvent
-
-    def dropEvent(self, event):
-        paths = [u.toLocalFile() for u in event.mimeData().urls() if u.isLocalFile()]
-        if not paths:
-            event.ignore()
-            return
-        proxy = self.model()
-        index = self.indexAt(event.position().toPoint())
-        entry = proxy.sourceModel().entry(proxy.mapToSource(index))
-        target = entry.path if entry and entry.folder else ""
-        move = bool(event.modifiers() & Qt.ShiftModifier) or event.proposedAction() == Qt.MoveAction
-        entries = self.cross_pane_entries(event)
-        if entries and all(e.archive for e in entries):
-            self.archive_dropped.emit(paths, target)
-        elif any(e.archive for e in entries):
-            # Never turn a mixed ZIP/file selection into a move by accident.
-            event.ignore()
-            return
-        else:
-            self.dropped.emit(paths, target, move)
-        # Never signal an external drag source to delete before our worker finishes.
-        event.setDropAction(Qt.CopyAction)
-        event.accept()
 
 
 def valid_name(name):
@@ -781,30 +524,6 @@ def extract_archives(paths, destination, remove_source=False):
     return errors
 
 
-STYLE = """
-QWidget { font-family: 'Segoe UI'; font-size: 10pt; }
-QMainWindow, QWidget#shell { background: #f3f5f8; color: #202a39; }
-QFrame#pane { background: #ffffff; border: 1px solid #dbe1e9; border-radius: 7px; }
-QLabel#heading { font-size: 11pt; font-weight: 600; color: #23354b; }
-QLabel#muted { color: #657388; font-size: 9pt; }
-QToolButton { background: transparent; border: 1px solid transparent; border-radius: 5px; padding: 5px 9px; }
-QToolButton:hover { background: #e6edf7; border-color: #d4e0ee; }
-QToolButton:pressed, QToolButton:checked { background: #d5e5fa; }
-QToolButton:disabled { color: #a0aab8; }
-QLineEdit { background: white; border: 1px solid #cdd6e1; border-radius: 5px; padding: 6px 9px; selection-background-color: #3478c9; }
-QLineEdit:focus { border-color: #3478c9; }
-QTreeView, QTreeWidget { border: none; background: #ffffff; alternate-background-color: #f7f9fc; outline: 0; selection-background-color: #dceaff; selection-color: #152d50; }
-QTreeView::item, QTreeWidget::item { min-height: 27px; padding: 2px; }
-QTreeView::item:hover, QTreeWidget::item:hover { background: #edf3fb; }
-QTreeView::item:selected, QTreeWidget::item:selected { background: #dceaff; color: #152d50; }
-QHeaderView::section { background: #f4f6f9; color: #526174; border: none; border-bottom: 1px solid #dce2eb; padding: 6px; font-size: 9pt; }
-QSplitter::handle { background: transparent; }
-QSplitter::handle:hover { background: #b9cde7; }
-QMenu { background: white; border: 1px solid #d5dce7; padding: 4px; }
-QMenu::item { padding: 6px 24px 6px 10px; }
-QMenu::item:selected { background: #dceaff; color: #152d50; }
-QStatusBar { color: #536174; background: #f3f5f8; }
-"""
 
 
 def svg_icon(body):
@@ -820,10 +539,12 @@ def svg_icon(body):
 class Explorer(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(APP)
+        self.settings = open_settings()
+        configure_network_trash(self.settings)
+        self.app_name = str(self.settings.value("app/name", APP, type=str)).strip() or APP
+        self.setWindowTitle(self.app_name)
         self.resize(1450, 820)
         self.setMinimumSize(850, 480)
-        self.settings = QSettings("KHzz", APP)
         self.pool = QThreadPool(self)
         self.pool.setMaxThreadCount(4)
         self.workers = set()
@@ -842,7 +563,7 @@ class Explorer(QMainWindow):
         self.archive_pairs = []
         self.archive_match_key = None
         self.size_job = None
-        self.size_db = folder_sizes.cache_path()
+        self.size_db = configured_cache_path(self.settings)
         self.size_attempted = set()
         self.generation = 0
         self.current = None
@@ -1036,48 +757,24 @@ class Explorer(QMainWindow):
         self.counts = []
         self.mode_selectors = []
         for i, default_mode in enumerate(("default", "archives")):
-            pane, layout = self.panel()
-            count = QLabel("0", objectName="muted")
-            mode = self.settings.value(f"pane/{i}/mode", default_mode, type=str)
-            if mode not in dict(PANE_MODES):
-                mode = default_mode
-            selector = QComboBox()
-            selector.setToolTip("Choose what this pane displays. Both panes share the current directory.")
-            for key, label in PANE_MODES:
-                selector.addItem(label, key)
-            selector.setCurrentIndex(selector.findData(mode))
-            heading = QWidget()
-            bar = QHBoxLayout(heading)
-            bar.setContentsMargins(7, 5, 7, 4)
-            bar.addWidget(selector, 1)
-            bar.addWidget(count)
-            layout.addWidget(heading)
-            view = FileView()
-            proxy = PaneFilter(mode, self)
-            proxy.hidden = self.show_hidden
-            proxy.setSourceModel(self.model)
-            view.setModel(proxy)
-            column = self.settings.value(f"pane/{i}/sort_column", 0, type=int)
-            descending = self.settings.value(f"pane/{i}/descending", False, type=bool)
-            view.sortByColumn(column if 0 <= column < 4 else 0,
-                              Qt.DescendingOrder if descending else Qt.AscendingOrder)
-            header = view.header()
-            header.setSectionsMovable(True)
-            header.setStretchLastSection(False)
-            header.setSectionResizeMode(0, QHeaderView.Stretch)
-            header.resizeSection(1, 82)
-            header.resizeSection(2, 78)
-            header.resizeSection(3, 145)
-            view.doubleClicked.connect(lambda i, v=view: self.double_click_entry(v, i))
+            table = create_table_pane(
+                i, default_mode, self.settings, self.model, self.show_hidden, self
+            )
+            pane, view, proxy, count, selector = (
+                table.widget, table.view, table.proxy, table.count, table.selector
+            )
+            view.doubleClicked.connect(lambda idx, v=view: self.double_click_entry(v, idx))
             view.clicked.connect(lambda _, v=view: self.set_active(v))
-            view.selectionModel().selectionChanged.connect(lambda *_args, v=view: self.selection_changed(v))
+            view.selectionModel().selectionChanged.connect(
+                lambda *_args, v=view: self.selection_changed(v)
+            )
             view.customContextMenuRequested.connect(lambda pos, v=view: self.context(v, pos))
-            view.dropped.connect(lambda paths, target, move: self.do_transfer(paths, target or self.current, move))
+            view.dropped.connect(
+                lambda paths, target, move: self.do_transfer(paths, target or self.current, move)
+            )
             view.archive_dropped.connect(
-                lambda paths, target: self.do_extract(paths, target or self.current, remove_source=True))
-            view.setToolTip(
-                "Drag ZIP files to the opposite pane to extract and recycle the ZIP. Drop on a folder to extract inside it.")
-            layout.addWidget(view, 1)
+                lambda paths, target: self.do_extract(paths, target or self.current, remove_source=True)
+            )
             self.splitter.addWidget(pane)
             self.views.append(view)
             self.proxies.append(proxy)
@@ -1427,7 +1124,7 @@ class Explorer(QMainWindow):
     def cleanup_duplicates(self, recursive=False, preferred=None):
         if not self.current or self.duplicate_cleanup:
             return
-        if recursive and QMessageBox.question(self, APP,
+        if recursive and QMessageBox.question(self, self.app_name,
                                               f"Recycle exact duplicates in this folder AND every subfolder?\n{self.current}\n"
                                               "One file per SHA-256 group will remain. Continue?",
                                               QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
@@ -1906,7 +1603,7 @@ class Explorer(QMainWindow):
                 self.open_entry(view, rows[0])
 
     def warn(self, text):
-        QMessageBox.warning(self, APP, text)
+        QMessageBox.warning(self, self.app_name, text)
 
     def context(self, view, pos):
         self.set_active(view)
@@ -2023,7 +1720,7 @@ class Explorer(QMainWindow):
     def do_transfer(self, paths, target, move):
         if not target or not paths:
             return
-        if move and not QMessageBox.question(self, APP, f"Move {len(paths)} item(s) to:\n{target}") == QMessageBox.Yes:
+        if move and not QMessageBox.question(self, self.app_name, f"Move {len(paths)} item(s) to:\n{target}") == QMessageBox.Yes:
             return
         self.operation("Moving" if move else "Copying", lambda: transfer(paths, target, move),
                        lambda: self.cut_paths.clear() if move else None)
@@ -2300,7 +1997,7 @@ class Explorer(QMainWindow):
         if self.editing() or not self.current:
             return
         paths = [e.path for e in self.selected()]
-        if paths and QMessageBox.question(self, APP,
+        if paths and QMessageBox.question(self, self.app_name,
                                           f"Move {len(paths)} item(s) to the Recycle Bin?") == QMessageBox.Yes:
             self.operation("Recycling", lambda: recycle(paths))
 
@@ -2436,17 +2133,9 @@ class Explorer(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    palette = QPalette()
-    palette.setColor(QPalette.Window, QColor("#f3f5f8"))
-    palette.setColor(QPalette.WindowText, QColor("#202a39"))
-    palette.setColor(QPalette.Base, QColor("#ffffff"))
-    palette.setColor(QPalette.Text, QColor("#202a39"))
-    palette.setColor(QPalette.Button, QColor("#f3f5f8"))
-    palette.setColor(QPalette.ButtonText, QColor("#202a39"))
-    palette.setColor(QPalette.Highlight, QColor("#dceaff"))
-    palette.setColor(QPalette.HighlightedText, QColor("#152d50"))
+    palette = stylesheet.import_palette()
     app.setPalette(palette)
-    app.setStyleSheet(STYLE)
+    app.setStyleSheet(stylesheet.STYLE)
     window = Explorer()
     window.show()
     sys.exit(app.exec())
