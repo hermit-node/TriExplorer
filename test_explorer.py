@@ -137,6 +137,46 @@ class ExplorerTest(unittest.TestCase):
                 w.pool.waitForDone(5000)
                 app.processEvents()
 
+    def test_external_filter_definitions(self):
+        import filters
+        self.assertIs(main.PANE_MODES, filters.PANE_MODES)
+        self.assertIs(main.CATEGORY_SUFFIXES, filters.CATEGORY_SUFFIXES)
+        self.assertIs(main.ARCHIVE_SUFFIXES, filters.ARCHIVE_SUFFIXES)
+        self.assertIs(main.archive_name, filters.archive_name)
+        self.assertTrue(main.archive_name("backup.TAR.ZST"))
+        self.assertTrue(main.archive_name("bundle.7Z"))
+        self.assertFalse(main.archive_name("report.docx"))
+        self.assertIn(".tar.zst", filters.CATEGORY_SUFFIXES["archives"])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "folder.zip").mkdir()
+            for name in ("backup.TAR.ZST", "art.AVIF", "report.DOCX", "script.PY", "item.txt"):
+                (root / name).write_bytes(b"test")
+            entries = {e.name: e for e in main.scan(str(root))}
+            self.assertFalse(entries["folder.zip"].archive)
+            self.assertTrue(entries["backup.TAR.ZST"].archive)
+            w = main.Explorer()
+            w.show()
+            try:
+                w.navigate(str(root))
+                wait_for(lambda: not w.workers)
+                self.assertEqual(w.mode_selectors[0].count(), len(filters.PANE_MODES))
+                def visible(mode):
+                    selector = w.mode_selectors[0]
+                    selector.setCurrentIndex(selector.findData(mode))
+                    app.processEvents()
+                    proxy = w.proxies[0]
+                    return {proxy.index(row, 0).data() for row in range(proxy.rowCount())}
+                self.assertEqual(visible("archives"), {"backup.TAR.ZST"})
+                self.assertEqual(visible("images"), {"art.AVIF"})
+                self.assertEqual(visible("documents"), {"report.DOCX", "item.txt"})
+                self.assertEqual(visible("code"), {"script.PY"})
+                self.assertEqual(visible("folders"), {"folder.zip"})
+            finally:
+                w.close()
+                w.pool.waitForDone(5000)
+                app.processEvents()
+
     def test_folder_size_cache(self):
         import folder_sizes
         with tempfile.TemporaryDirectory() as tmp:

@@ -19,29 +19,30 @@ from pathlib import Path
 from datetime import datetime
 
 from PySide6.QtCore import (Qt, QAbstractTableModel, QModelIndex, QSortFilterProxyModel,
-    QDir, QUrl, QMimeData, QFile, QFileSystemWatcher, QTimer, QSettings,
-    QObject, Signal, QRunnable, QThreadPool, QStandardPaths, QEvent, QSize, QPropertyAnimation, QEasingCurve)
-from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QDrag, QPalette, QColor, QIcon, QPixmap, QPainter, QImageReader
+                            QDir, QUrl, QMimeData, QFile, QFileSystemWatcher, QTimer, QSettings,
+                            QObject, Signal, QRunnable, QThreadPool, QStandardPaths, QEvent, QSize, QPropertyAnimation,
+                            QEasingCurve)
+from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QDrag, QPalette, QColor, QIcon, QPixmap, QPainter, \
+    QImageReader
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-    QHBoxLayout, QSplitter, QTreeWidget, QTreeWidgetItem, QTreeView, QHeaderView,
-    QAbstractItemView, QToolButton, QLineEdit, QLabel, QMenu, QMessageBox,
-    QInputDialog, QStyle, QFrame, QFileDialog, QComboBox, QSizePolicy)
+                               QHBoxLayout, QSplitter, QTreeWidget, QTreeWidgetItem, QTreeView, QHeaderView,
+                               QAbstractItemView, QToolButton, QLineEdit, QLabel, QMenu, QMessageBox,
+                               QInputDialog, QStyle, QFrame, QFileDialog, QComboBox, QSizePolicy)
+
+from filters import PANE_MODES, CATEGORY_SUFFIXES, ARCHIVE_SUFFIXES, archive_name
 
 APP = "TriExplorer"
 PC = ""
-ARCHIVE_SUFFIXES = (".zip", ".7z", ".rar", ".tar", ".tgz", ".tbz", ".tbz2",
-    ".txz", ".gz", ".bz2", ".xz", ".zst", ".cab", ".arj", ".lz", ".lzma",
-    ".iso", ".wim", ".esd", ".zipx", ".z", ".lzh", ".cpio", ".001", ".tar.zst")
 PATH_ROLE = Qt.ItemDataRole.UserRole
 SORT_ROLE = int(PATH_ROLE) + 1
 LOADED_ROLE = int(PATH_ROLE) + 2
 
+
 def normalized(path):
     return os.path.normcase(os.path.normpath(path)) if path else PC
 
-def archive_name(name):
-    return name.lower().endswith(ARCHIVE_SUFFIXES)
+
 
 def readable_size(n):
     if n is None:
@@ -52,6 +53,7 @@ def readable_size(n):
             return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
         value /= 1024
 
+
 @dataclass(frozen=True)
 class Entry:
     path: str
@@ -61,6 +63,7 @@ class Entry:
     size: int | None = None
     modified: float | None = None
     hidden: bool = False
+
 
 def scan(path):
     if path == PC:
@@ -76,8 +79,8 @@ def scan(path):
                 stat = item.stat(follow_symlinks=False)
                 hidden = item.name.startswith(".") or bool(getattr(stat, "st_file_attributes", 0) & 2)
                 entries.append(Entry(item.path, item.name, folder,
-                    not folder and archive_name(item.name),
-                    None if folder else stat.st_size, stat.st_mtime, hidden))
+                                     not folder and archive_name(item.name),
+                                     None if folder else stat.st_size, stat.st_mtime, hidden))
             except OSError:
                 # A file may disappear or deny metadata access during enumeration.
                 try:
@@ -85,12 +88,14 @@ def scan(path):
                 except OSError:
                     folder = False
                 entries.append(Entry(item.path, item.name, folder,
-                    not folder and archive_name(item.name), hidden=item.name.startswith(".")))
+                                     not folder and archive_name(item.name), hidden=item.name.startswith(".")))
     return entries
+
 
 class WorkerSignals(QObject):
     finished = Signal(object, object)
     progress = Signal(object, object, object)
+
 
 class Worker(QRunnable):
     def __init__(self, fn):
@@ -105,6 +110,7 @@ class Worker(QRunnable):
             self.signals.finished.emit(None, str(exc))
         else:
             self.signals.finished.emit(result, None)
+
 
 class Files(QAbstractTableModel):
     headers = ("Name", "Size", "Type", "Modified")
@@ -151,7 +157,7 @@ class Files(QAbstractTableModel):
         cached = self.folder_sizes.get(normalized(e.path)) if e.folder else None
         size = cached.size if cached is not None else e.size
         kind = "Folder" if e.folder else ("Archive" if e.archive else (
-            Path(e.name).suffix[1:].upper() or "File"))
+                Path(e.name).suffix[1:].upper() or "File"))
         if role == PATH_ROLE:
             return e.path
         if role == SORT_ROLE:
@@ -164,7 +170,8 @@ class Files(QAbstractTableModel):
                 if cached is None:
                     return "Folder size not calculated"
                 stamp = datetime.fromtimestamp(cached.checked).strftime("%Y-%m-%d %H:%M")
-                return f"{cached.size:,} bytes (logical total)\nCalculated: {stamp}" + ("\nCached value may be stale" if cached.stale else "")
+                return f"{cached.size:,} bytes (logical total)\nCalculated: {stamp}" + (
+                    "\nCached value may be stale" if cached.stale else "")
             note = self.archive_notes.get(normalized(e.path))
             return e.path + ("\n" + note if note else "")
         if role == Qt.TextAlignmentRole and col == 1:
@@ -188,28 +195,6 @@ class Files(QAbstractTableModel):
     def supportedDragActions(self):
         return Qt.CopyAction | Qt.MoveAction
 
-PANE_MODES = (
-    ("default", "Files & folders"),
-    ("all", "All items"),
-    ("alphabetical", "All items · A–Z"),
-    ("folders", "Folders only"),
-    ("files", "Files only"),
-    ("archives", "Compressed archives"),
-    ("images", "Images"),
-    ("documents", "Documents"),
-    ("video", "Videos"),
-    ("audio", "Audio"),
-    ("code", "Code & scripts"),
-    ("duplicates", "Duplicates only (SHA-256)"),
-    ("archive_matches", "ZIP / folder matches"),
-)
-CATEGORY_SUFFIXES = {
-    "images": frozenset(".jpg .jpeg .png .gif .webp .bmp .tiff .tif .svg .ico .heic .heif .avif .jxl .raw .dng .psd .ai .cr2 .cr3 .nef .arw .orf .rw2".split()),
-    "documents": frozenset(".pdf .doc .docx .odt .rtf .txt .md .xls .xlsx .ods .csv .tsv .ppt .pptx .odp .epub .mobi".split()),
-    "video": frozenset(".mp4 .mkv .avi .mov .wmv .webm .m4v .mpeg .mpg .mts .m2ts .flv .3gp".split()),
-    "audio": frozenset(".mp3 .wav .flac .aac .m4a .ogg .opus .wma .aiff .aif .alac .mid .midi".split()),
-    "code": frozenset(".py .pyw .js .jsx .ts .tsx .mjs .cjs .html .css .scss .json .yaml .yml .toml .xml .sql .sh .bat .cmd .ps1 .c .h .cpp .hpp .cs .java .kt .go .rs .rb .php .swift .lua .r .vue .svelte .ipynb".split()),
-}
 
 class PaneFilter(QSortFilterProxyModel):
     def __init__(self, mode, parent=None):
@@ -252,7 +237,8 @@ class PaneFilter(QSortFilterProxyModel):
             return not e.folder
         if mode == "archives":
             return e.archive
-        return not e.folder and not e.archive and os.path.splitext(e.name.casefold())[1] in CATEGORY_SUFFIXES.get(mode, ())
+        return not e.folder and not e.archive and os.path.splitext(e.name.casefold())[1] in CATEGORY_SUFFIXES.get(mode,
+                                                                                                                  ())
 
     def lessThan(self, left, right):
         a = self.sourceModel().entry(left)
@@ -260,6 +246,7 @@ class PaneFilter(QSortFilterProxyModel):
         if self.mode not in ("alphabetical", "archive_matches") and a.folder != b.folder:
             return a.folder if self.sortOrder() == Qt.AscendingOrder else b.folder
         return super().lessThan(left, right)
+
 
 class RenameEdit(QLineEdit):
     commit_name = Signal()
@@ -296,9 +283,9 @@ def read_image_preview(path, cancelled):
         raise ValueError(reader.errorString() or "Unsupported image format")
     # Some plugins must decode the whole image before scaling. Bound both input
     # dimensions and the retained image; never use a full-resolution pixmap.
-    if original.width()*original.height() > 80_000_000:
+    if original.width() * original.height() > 80_000_000:
         raise ValueError("Image too large for preview (80 megapixel limit)")
-    scaled = original.scaled(QSize(1400,1400), Qt.KeepAspectRatio)
+    scaled = original.scaled(QSize(1400, 1400), Qt.KeepAspectRatio)
     if original.width() > 1400 or original.height() > 1400:
         reader.setScaledSize(scaled)
     if cancelled():
@@ -309,7 +296,7 @@ def read_image_preview(path, cancelled):
     if image.isNull():
         raise ValueError(reader.errorString() or "Unable to decode image")
     if image.width() > 1400 or image.height() > 1400:
-        image = image.scaled(QSize(1400,1400), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        image = image.scaled(QSize(1400, 1400), Qt.KeepAspectRatio, Qt.SmoothTransformation)
     return image, original
 
 
@@ -318,7 +305,7 @@ class PreviewLabel(QLabel):
         super().__init__("Select an image")
         self.setAlignment(Qt.AlignCenter)
         self.setWordWrap(True)
-        self.setMinimumSize(0,0)
+        self.setMinimumSize(0, 0)
         self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.source = None
 
@@ -426,6 +413,7 @@ class FileView(QTreeView):
         event.setDropAction(Qt.CopyAction)
         event.accept()
 
+
 def valid_name(name):
     reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
                 *(f"LPT{i}" for i in range(1, 10))}
@@ -433,6 +421,7 @@ def valid_name(name):
         return False
     return bool(name and name not in (".", "..") and not any(c in name for c in '/\\<>:"|?*')
                 and not name.endswith((" ", ".")) and not any(ord(c) < 32 for c in name))
+
 
 def reject_junctions(path):
     if getattr(os.path, "isjunction", lambda _: False)(path):
@@ -442,6 +431,7 @@ def reject_junctions(path):
             for name in dirs:
                 if getattr(os.path, "isjunction", lambda _: False)(os.path.join(base, name)):
                     raise ValueError(f"Folder contains a junction: {os.path.join(base, name)}")
+
 
 def transfer(paths, target, move):
     errors = []
@@ -495,7 +485,9 @@ def transfer(paths, target, move):
             errors.append(f"{source}: {exc}")
     return errors
 
+
 NETWORK_TRASH = ".TriExplorer-Recycle"
+
 
 def network_root(path):
     if os.name != "nt":
@@ -509,14 +501,17 @@ def network_root(path):
         return Path(root)
     return None
 
+
 def trash_directory(root):
     return Path(root) / NETWORK_TRASH
+
 
 def checked_trash(root):
     trash = trash_directory(root)
     if trash.is_symlink() or getattr(trash, "is_junction", lambda: False)():
         raise ValueError("Recycle directory cannot be a link or junction")
     return trash
+
 
 def share_recycle(path, root):
     root = Path(root)
@@ -538,6 +533,7 @@ def share_recycle(path, root):
             shutil.rmtree(entry, ignore_errors=True)
         raise
 
+
 def share_trash_entries(root):
     trash = checked_trash(root)
     if not trash.exists():
@@ -558,6 +554,7 @@ def share_trash_entries(root):
         except (OSError, ValueError, KeyError, TypeError):
             continue
     return sorted(records, reverse=True)
+
 
 def restore_share_item(root, entry_id):
     if len(entry_id) != 32 or any(c not in "0123456789abcdef" for c in entry_id):
@@ -586,6 +583,7 @@ def restore_share_item(root, entry_id):
     (entry / "restore.json").unlink()
     entry.rmdir()
 
+
 def recycle(paths):
     errors = []
     for path in paths:
@@ -601,6 +599,7 @@ def recycle(paths):
         except Exception as exc:
             errors.append(f"{path}: {exc}")
     return errors
+
 
 def make_zip(paths, dest):
     with zipfile.ZipFile(dest, "x", zipfile.ZIP_DEFLATED, allowZip64=True) as z:
@@ -620,6 +619,7 @@ def make_zip(paths, dest):
             else:
                 z.write(root, root.name)
     return []
+
 
 def zip_members(z):
     """Validate all entries and classify paths before creating anything."""
@@ -645,6 +645,7 @@ def zip_members(z):
             raise ValueError(f"ZIP file/directory conflict: {'/'.join(parts)}")
     return members
 
+
 def zip_root(members):
     """A single real or implicit top-level directory, not a lone file."""
     if not members:
@@ -657,8 +658,10 @@ def zip_root(members):
             return None
     return candidate
 
+
 class ZipPasswordRequired(Exception):
     pass
+
 
 def open_zip_member(z, member, password):
     encrypted = bool(member.flag_bits & 1)
@@ -670,6 +673,7 @@ def open_zip_member(z, member, password):
         if encrypted and "password" in str(exc).lower():
             raise ZipPasswordRequired() from None
         raise
+
 
 def extract_members(z, members, target, strip_root=False, password=None):
     target = Path(target)
@@ -700,11 +704,13 @@ def extract_members(z, members, target, strip_root=False, password=None):
         # On Windows rename fails if the destination exists, including during a race.
         staged.rename(target)
 
+
 def unzip(path, target):
     """Explicit destination (retained for compatibility)."""
     with zipfile.ZipFile(path) as z:
         extract_members(z, zip_members(z), target)
     return []
+
 
 def smart_unzip(path, destination, password=None, *, report_encrypted=False):
     """Extract atomically, with support for ZipCrypto and WinZip AES."""
@@ -728,15 +734,18 @@ def smart_unzip(path, destination, password=None, *, report_encrypted=False):
         extract_members(z, members, target, strip_root=root is not None, password=password)
     return (target, encrypted) if report_encrypted else target
 
+
 def archive_signature(path):
     stat = os.stat(path)
     return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns
+
 
 @dataclass(frozen=True)
 class ExtractionResult:
     password_required: bool = False
     encrypted: bool = False
     error: str | None = None
+
 
 def extract_one(path, destination, remove_source=False, password=None):
     try:
@@ -757,8 +766,9 @@ def extract_one(path, destination, remove_source=False, password=None):
                 raise RuntimeError("; ".join(failures))
         except Exception as exc:
             return ExtractionResult(encrypted=encrypted,
-                error=f"{Path(path).name}: extracted successfully, but the source was not recycled ({exc})")
+                                    error=f"{Path(path).name}: extracted successfully, but the source was not recycled ({exc})")
     return ExtractionResult(encrypted=encrypted)
+
 
 def extract_archives(paths, destination, remove_source=False):
     errors = []
@@ -796,6 +806,7 @@ QMenu::item:selected { background: #dceaff; color: #152d50; }
 QStatusBar { color: #536174; background: #f3f5f8; }
 """
 
+
 def svg_icon(body):
     pixel = QPixmap(48, 48)
     pixel.fill(Qt.transparent)
@@ -804,6 +815,7 @@ def svg_icon(body):
     renderer.render(painter)
     painter.end()
     return QIcon(pixel)
+
 
 class Explorer(QMainWindow):
     def __init__(self):
@@ -862,9 +874,12 @@ class Explorer(QMainWindow):
             "back": sp.SP_ArrowBack, "forward": sp.SP_ArrowForward,
             "up": sp.SP_ArrowUp, "refresh": sp.SP_BrowserReload}.items()}
         self.icons.update({
-            "folder": svg_icon('<path d="M2 6V4a1 1 0 0 1 1-1h6l2 3h10a1 1 0 0 1 1 1v13H2z" fill="#e9b656" stroke="#b98531" stroke-linejoin="round"/><path d="M2 8h20v12H2z" fill="#f4ce7d" stroke="#b98531" stroke-linejoin="round"/>'),
-            "file": svg_icon('<path d="M5 2h9l5 5v15H5z" fill="#f3f6fa" stroke="#8a9db4" stroke-width="1.4" stroke-linejoin="round"/><path d="M14 2v5h5M8 12h8M8 15h8M8 18h5" fill="none" stroke="#8a9db4" stroke-linecap="round"/>'),
-            "archive": svg_icon('<rect x="3" y="2" width="18" height="20" rx="2" fill="#e3eaf9" stroke="#728dbd" stroke-width="1.3"/><path d="M12 3v12" stroke="#526d9e" stroke-width="2" stroke-dasharray="2 1"/><rect x="9.5" y="14" width="5" height="5" rx="1" fill="#fff" stroke="#526d9e"/>')
+            "folder": svg_icon(
+                '<path d="M2 6V4a1 1 0 0 1 1-1h6l2 3h10a1 1 0 0 1 1 1v13H2z" fill="#e9b656" stroke="#b98531" stroke-linejoin="round"/><path d="M2 8h20v12H2z" fill="#f4ce7d" stroke="#b98531" stroke-linejoin="round"/>'),
+            "file": svg_icon(
+                '<path d="M5 2h9l5 5v15H5z" fill="#f3f6fa" stroke="#8a9db4" stroke-width="1.4" stroke-linejoin="round"/><path d="M14 2v5h5M8 12h8M8 15h8M8 18h5" fill="none" stroke="#8a9db4" stroke-linecap="round"/>'),
+            "archive": svg_icon(
+                '<rect x="3" y="2" width="18" height="20" rx="2" fill="#e3eaf9" stroke="#728dbd" stroke-width="1.3"/><path d="M12 3v12" stroke="#526d9e" stroke-width="2" stroke-dasharray="2 1"/><rect x="9.5" y="14" width="5" height="5" rx="1" fill="#fff" stroke="#526d9e"/>')
         })
         self.model = Files(self.icons, self)
         self.watcher = QFileSystemWatcher(self)
@@ -892,9 +907,11 @@ class Explorer(QMainWindow):
         if progress is not None:
             job.signals.progress.connect(progress, Qt.QueuedConnection)
         self.workers.add(job)
+
         def finished(result, error):
             self.workers.discard(job)
             done(result, error)
+
         job.signals.finished.connect(finished, Qt.QueuedConnection)
         self.pool.start(job)
 
@@ -989,7 +1006,7 @@ class Explorer(QMainWindow):
         self.tree.setIndentation(17)
         self.tree.itemExpanded.connect(self.load_tree)
         self.tree.itemClicked.connect(lambda item, _: self.navigate(item.data(0, PATH_ROLE))
-                                      if item.data(0, PATH_ROLE) is not None else None)
+        if item.data(0, PATH_ROLE) is not None else None)
         self.side_splitter = QSplitter(Qt.Vertical)
         self.side_splitter.setChildrenCollapsible(False)
         self.side_splitter.setHandleWidth(7)
@@ -1056,8 +1073,10 @@ class Explorer(QMainWindow):
             view.selectionModel().selectionChanged.connect(lambda *_args, v=view: self.selection_changed(v))
             view.customContextMenuRequested.connect(lambda pos, v=view: self.context(v, pos))
             view.dropped.connect(lambda paths, target, move: self.do_transfer(paths, target or self.current, move))
-            view.archive_dropped.connect(lambda paths, target: self.do_extract(paths, target or self.current, remove_source=True))
-            view.setToolTip("Drag ZIP files to the opposite pane to extract and recycle the ZIP. Drop on a folder to extract inside it.")
+            view.archive_dropped.connect(
+                lambda paths, target: self.do_extract(paths, target or self.current, remove_source=True))
+            view.setToolTip(
+                "Drag ZIP files to the opposite pane to extract and recycle the ZIP. Drop on a folder to extract inside it.")
             layout.addWidget(view, 1)
             self.splitter.addWidget(pane)
             self.views.append(view)
@@ -1090,7 +1109,8 @@ class Explorer(QMainWindow):
         self.splitter.setStretchFactor(2, 2)
         self.build_quick()
         for key, fn in (("Alt+Left", self.back), ("Alt+Right", self.forward), ("Alt+Up", self.up),
-                        ("F5", self.refresh), ("Alt+P", lambda: self.preview_button.toggle()), ("Alt+Home", self.go_home), ("Ctrl+L", self.focus_address),
+                        ("F5", self.refresh), ("Alt+P", lambda: self.preview_button.toggle()),
+                        ("Alt+Home", self.go_home), ("Ctrl+L", self.focus_address),
                         ("Ctrl+F", self.search.setFocus), ("Ctrl+Shift+N", self.new_folder),
                         ("F2", self.rename), ("Delete", self.delete), ("Ctrl+C", self.copy),
                         ("Ctrl+X", self.cut), ("Ctrl+V", self.paste), ("Return", self.open_selected),
@@ -1171,6 +1191,7 @@ class Explorer(QMainWindow):
         self.duplicate_scan_errors = []
         self.update_counts()
         self.statusBar().showMessage("Checking matching file sizes and SHA-256...")
+
         def done(result, error):
             if stop.is_set() or self.duplicate_job is not stop:
                 return
@@ -1191,6 +1212,7 @@ class Explorer(QMainWindow):
             self.statusBar().showMessage(f"{len(result.groups)} duplicate groups; {len(paths)} matching files"
                                          + (f"; {len(result.errors)} skipped/errors" if result.errors else ""))
             self.refresh_folder_sizes()
+
         def progress(checked, total, new_groups):
             if self.duplicate_job is stop and not stop.is_set():
                 if new_groups:
@@ -1201,11 +1223,13 @@ class Explorer(QMainWindow):
                             proxy.invalidate()
                 self.duplicate_progress = f"SHA: {checked:,}/{total:,}"
                 self.update_counts()
+
         hidden = self.show_hidden
         self.submit(lambda emit: duplicates.find_duplicates(path, show_hidden=hidden,
-                    cancelled=stop.is_set, progress=lambda n, total: emit(n, total, None),
-                    matches=lambda groups, n, total: emit(n, total, groups),
-                    cache_db=self.size_db), done, progress)
+                                                            cancelled=stop.is_set,
+                                                            progress=lambda n, total: emit(n, total, None),
+                                                            matches=lambda groups, n, total: emit(n, total, groups),
+                                                            cache_db=self.size_db), done, progress)
 
     def cancel_archive_matches(self):
         self.archive_match_key = None
@@ -1251,7 +1275,8 @@ class Explorer(QMainWindow):
                 proxy.invalidate()
         entries = [e for e in self.model.entries if self.show_hidden or not e.hidden]
         folders = [e.path for e in entries if e.folder]
-        archives = [(e.path,e.size) for e in entries if not e.folder and e.name.lower().endswith(".zip") and e.size is not None]
+        archives = [(e.path, e.size) for e in entries if
+                    not e.folder and e.name.lower().endswith(".zip") and e.size is not None]
         sizes = dict(self.model.folder_sizes)
         password = self.zip_password if password_override is None else password_override
         stop = Event()
@@ -1259,8 +1284,9 @@ class Explorer(QMainWindow):
         self.archive_match_progress = "Checking sizes..."
         self.archive_match_errors = []
         self.update_counts()
+
         def add(match):
-            for item, other in ((match.archive, match.folder),(match.folder, match.archive)):
+            for item, other in ((match.archive, match.folder), (match.folder, match.archive)):
                 key = normalized(item)
                 note = f"{Path(other).name}: {match.status}"
                 self.model.archive_notes[key] = (self.model.archive_notes.get(key, "") + "\n" + note).strip()
@@ -1268,7 +1294,8 @@ class Explorer(QMainWindow):
                     proxy.archive_match_paths.add(key)
                     if proxy.mode == "archive_matches":
                         proxy.invalidate()
-        def progress(n,total,match):
+
+        def progress(n, total, match):
             if self.archive_match_job is not stop or stop.is_set():
                 return
             if match:
@@ -1276,7 +1303,8 @@ class Explorer(QMainWindow):
                 add(match)
             self.archive_match_progress = f"ZIP: {n}/{total}"
             self.update_counts()
-        def done(result,error):
+
+        def done(result, error):
             if self.archive_match_job is not stop or stop.is_set():
                 return
             self.archive_match_job = None
@@ -1293,15 +1321,19 @@ class Explorer(QMainWindow):
                 self.archive_match_progress = "Scan failed"
             self.update_counts()
             self.refresh_folder_sizes()
+
         folder_rows = [(e.path, e.modified) for e in entries if e.folder]
+
         def run(emit):
             matches, errors = archive_matches.find_matches(folders, archives, sizes, self.size_db,
-                zip_members, password, stop.is_set, lambda n,total,m: emit(n,total,m))
+                                                           zip_members, password, stop.is_set,
+                                                           lambda n, total, m: emit(n, total, m))
             try:
                 updated = folder_sizes.lookup(self.size_db, folder_rows)
             except (OSError, sqlite3.Error):
                 updated = {}
             return matches, errors, updated
+
         self.submit(run, done, progress)
 
     def cleanup_archive_pairs(self, preferred=None):
@@ -1327,6 +1359,7 @@ class Explorer(QMainWindow):
         removed = 0
         issues = []
         total = len(queue)
+
         def finish():
             self.duplicate_cleanup = False
             self.refresh()
@@ -1335,15 +1368,18 @@ class Explorer(QMainWindow):
             self.statusBar().showMessage(message)
             if issues:
                 self.warn(message + "\n\n" + "\n".join(issues))
+
         def next_group():
             if not queue:
                 finish()
                 return
             group = queue.popleft()
             verify(group, self.zip_password)
+
         def verify(group, password):
             name = Path(group[0].archive).name
-            self.statusBar().showMessage(f"Verifying {total-len(queue)}/{total}: {name}")
+            self.statusBar().showMessage(f"Verifying {total - len(queue)}/{total}: {name}")
+
             def run():
                 pending = None
                 errors = []
@@ -1363,6 +1399,7 @@ class Explorer(QMainWindow):
                     except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
                         errors.append(name + ": " + str(exc))
                 return (False, False, pending, errors)
+
             def done(result, error):
                 nonlocal removed
                 if error:
@@ -1382,16 +1419,18 @@ class Explorer(QMainWindow):
                     else:
                         issues.extend(errors or [name + ": no longer an exact content match; retained"])
                 next_group()
+
             self.submit(run, done)
+
         next_group()
 
     def cleanup_duplicates(self, recursive=False, preferred=None):
         if not self.current or self.duplicate_cleanup:
             return
         if recursive and QMessageBox.question(self, APP,
-                f"Recycle exact duplicates in this folder AND every subfolder?\n{self.current}\n"
-                "One file per SHA-256 group will remain. Continue?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
+                                              f"Recycle exact duplicates in this folder AND every subfolder?\n{self.current}\n"
+                                              "One file per SHA-256 group will remain. Continue?",
+                                              QMessageBox.Yes | QMessageBox.No, QMessageBox.No) != QMessageBox.Yes:
             return
         path = self.current
         show_hidden = self.show_hidden
@@ -1399,9 +1438,11 @@ class Explorer(QMainWindow):
         self.cancel_size_scan()
         self.duplicate_cleanup = True
         self.statusBar().showMessage("Checking sizes and SHA-256; recycling exact duplicates...")
+
         def run():
             result = duplicates.find_duplicates(path, recursive, preferred, show_hidden)
             return duplicates.remove_duplicates(result, recycle)
+
         def done(result, error):
             self.duplicate_cleanup = False
             if error:
@@ -1412,6 +1453,7 @@ class Explorer(QMainWindow):
             self.refresh_tree_branch()
             if not error:
                 self.statusBar().showMessage(f"Recycled {result[0]} duplicate(s)")
+
         self.submit(run, done)
 
     def build_quick(self):
@@ -1531,6 +1573,7 @@ class Explorer(QMainWindow):
             return
         item.setData(0, LOADED_ROLE, "loading")
         epoch = self.tree_epoch
+
         def done(entries, error):
             if epoch != self.tree_epoch:
                 return
@@ -1557,6 +1600,7 @@ class Explorer(QMainWindow):
             if not item.childCount():
                 item.setChildIndicatorPolicy(QTreeWidgetItem.DontShowIndicator)
             self.sync_tree()
+
         self.submit(lambda: scan(path), done)
 
     def sync_tree(self):
@@ -1677,6 +1721,7 @@ class Explorer(QMainWindow):
         self.statusBar().showMessage("Loading " + (path or "This PC") + "...")
         if self.watcher.directories():
             self.watcher.removePaths(self.watcher.directories())
+
         def done(result, error):
             if token != self.generation:
                 return
@@ -1707,13 +1752,16 @@ class Explorer(QMainWindow):
                 self.scan_archive_matches(force=False)
             if self.size_job is None:
                 self.refresh_folder_sizes()
+
         def list_with_sizes():
             entries = scan(path)
             try:
-                sizes = folder_sizes.lookup(self.size_db, [(e.path, e.modified) for e in entries if e.folder]) if path else {}
+                sizes = folder_sizes.lookup(self.size_db,
+                                            [(e.path, e.modified) for e in entries if e.folder]) if path else {}
             except (OSError, ValueError, sqlite3.Error):
                 sizes = {}
             return entries, sizes
+
         self.submit(list_with_sizes, done)
 
     def cancel_size_scan(self):
@@ -1740,6 +1788,7 @@ class Explorer(QMainWindow):
         stop = Event()
         self.size_job = stop
         self.statusBar().showMessage("Calculating uncached/stale folder sizes...")
+
         def progress(path, value, error):
             if self.size_job is not stop or stop.is_set():
                 return
@@ -1748,6 +1797,7 @@ class Explorer(QMainWindow):
                 self.size_attempted.discard(path)
             else:
                 self.size_attempted.add(path)
+
         def done(result, error):
             if self.size_job is not stop or stop.is_set():
                 return
@@ -1758,8 +1808,8 @@ class Explorer(QMainWindow):
                 self.statusBar().showMessage(f"Folder sizes: {len(result)} incomplete; right-click to retry")
             else:
                 self.statusBar().showMessage("Folder sizes up to date")
-        self.submit(lambda emit: folder_sizes.refresh(self.size_db, paths, stop.is_set, emit), done, progress)
 
+        self.submit(lambda emit: folder_sizes.refresh(self.size_db, paths, stop.is_set, emit), done, progress)
 
     def filter_changed(self, text):
         if self.rename_editor is not None and not self.rename_busy:
@@ -1796,7 +1846,8 @@ class Explorer(QMainWindow):
         for proxy, label in zip(self.proxies, self.counts):
             if proxy.mode == "archive_matches":
                 label.setText(self.archive_match_progress or "ZIP / folder matches")
-                label.setToolTip("\n".join(self.archive_match_errors[:30]) or "Hover matched rows for verification details")
+                label.setToolTip(
+                    "\n".join(self.archive_match_errors[:30]) or "Hover matched rows for verification details")
             elif proxy.mode == "duplicates" and self.duplicate_job is not None:
                 label.setText(f"{proxy.rowCount():,} matches | {self.duplicate_progress or 'Scanning...'}")
                 label.setToolTip("Checking exact SHA-256 matches; results appear as groups finish")
@@ -1826,7 +1877,8 @@ class Explorer(QMainWindow):
             self.schedule_preview()
             entries = self.selected(view)
             if entries:
-                self.statusBar().showMessage(f"{len(entries)} selected  |  {readable_size(sum(e.size or 0 for e in entries))}")
+                self.statusBar().showMessage(
+                    f"{len(entries)} selected  |  {readable_size(sum(e.size or 0 for e in entries))}")
 
     def selected(self, view=None):
         view = view or self.selected_view()
@@ -1894,9 +1946,11 @@ class Explorer(QMainWindow):
             dup.addAction("Find ZIP / folder matches", lambda: self.show_archive_matches(view))
             dup.addAction("Verify ZIP / folder matches with password...", lambda: self.show_archive_matches(view, True))
             if self.archive_match_errors:
-                dup.addAction("Show ZIP/folder scan errors", lambda: self.warn("\n".join(self.archive_match_errors[:100])))
+                dup.addAction("Show ZIP/folder scan errors",
+                              lambda: self.warn("\n".join(self.archive_match_errors[:100])))
             if self.duplicate_scan_errors:
-                dup.addAction("Show skipped files / scan errors", lambda: self.warn("\n".join(self.duplicate_scan_errors[:100])))
+                dup.addAction("Show skipped files / scan errors",
+                              lambda: self.warn("\n".join(self.duplicate_scan_errors[:100])))
             if view.model().mode == "archive_matches":
                 cleanup = dup.addAction("Recycle matching ZIPs - keep folders", lambda: self.cleanup_archive_pairs())
                 cleanup.setEnabled(self.archive_match_job is None and bool(self.archive_pairs))
@@ -1955,6 +2009,7 @@ class Explorer(QMainWindow):
 
     def operation(self, label, fn, after=None):
         self.statusBar().showMessage(label + "...")
+
         def done(result, error):
             if error or result:
                 self.warn(error or "\n".join(result))
@@ -1962,6 +2017,7 @@ class Explorer(QMainWindow):
                 after()
             self.refresh()
             self.refresh_tree_branch()
+
         self.submit(fn, done)
 
     def do_transfer(self, paths, target, move):
@@ -2008,7 +2064,7 @@ class Explorer(QMainWindow):
         # Follow the original visible order even if a new name sorts elsewhere.
         self.rename_queue = deque(
             e.path for row in range(index.row(), proxy.rowCount())
-            if (e := self.model.entry(proxy.mapToSource(proxy.index(row,0)))) and not e.folder)
+            if (e := self.model.entry(proxy.mapToSource(proxy.index(row, 0)))) and not e.folder)
         self.next_rename()
 
     def next_rename(self):
@@ -2019,7 +2075,7 @@ class Explorer(QMainWindow):
         while self.rename_queue:
             path = self.rename_queue.popleft()
             for row in range(proxy.rowCount()):
-                index = proxy.index(row,0)
+                index = proxy.index(row, 0)
                 if normalized(index.data(PATH_ROLE)) != normalized(path):
                     continue
                 entry = self.model.entry(proxy.mapToSource(index))
@@ -2028,21 +2084,21 @@ class Explorer(QMainWindow):
                 self.rename_path = entry.path
                 view.setCurrentIndex(index)
                 view.selectionModel().select(index, view.selectionModel().SelectionFlag.ClearAndSelect |
-                                                   view.selectionModel().SelectionFlag.Rows)
+                                             view.selectionModel().SelectionFlag.Rows)
                 view.scrollTo(index)
                 editor = RenameEdit(view.viewport())
                 editor.setObjectName("inlineRename")
                 editor.setStyleSheet("QLineEdit {padding: 1px 3px; border-radius: 2px;}")
                 editor.setText(entry.name)
                 rect = view.visualRect(index)
-                editor.setGeometry(rect.adjusted(19,0,0,0) if rect.width() > 55 else rect)
+                editor.setGeometry(rect.adjusted(19, 0, 0, 0) if rect.width() > 55 else rect)
                 self.rename_editor = editor
                 editor.commit_name.connect(lambda ed=editor: self.commit_rename(ed))
                 editor.cancel_name.connect(lambda ed=editor: self.cancel_rename_editor(ed))
                 editor.show()
                 editor.setFocus()
                 stem = Path(entry.name).stem
-                editor.setSelection(0,len(stem))
+                editor.setSelection(0, len(stem))
                 return
         self.end_rename()
 
@@ -2071,7 +2127,7 @@ class Explorer(QMainWindow):
             return
         path = self.rename_path
         name = editor.text()
-        if not valid_name(name) or getattr(os.path,"isreserved",lambda n:False)(name):
+        if not valid_name(name) or getattr(os.path, "isreserved", lambda n: False)(name):
             editor.setStyleSheet("QLineEdit {border: 1px solid #c33; padding: 1px 3px;}")
             self.statusBar().showMessage("Invalid filename; correct it or press Escape.")
             return
@@ -2079,16 +2135,18 @@ class Explorer(QMainWindow):
             self.remove_rename_editor()
             self.next_rename()
             return
-        dest = os.path.join(os.path.dirname(path),name)
+        dest = os.path.join(os.path.dirname(path), name)
         self.rename_busy = True
         editor.setReadOnly(True)
         self.statusBar().showMessage("Renaming " + os.path.basename(path) + "...")
+
         def work():
             if os.path.lexists(dest) and normalized(path) != normalized(dest):
                 raise FileExistsError("Already exists: " + name)
-            os.rename(path,dest)
+            os.rename(path, dest)
             return dest
-        def done(result,error):
+
+        def done(result, error):
             self.rename_busy = False
             if error:
                 if self.rename_editor is editor:
@@ -2101,17 +2159,19 @@ class Explorer(QMainWindow):
             for row, entry in enumerate(self.model.entries):
                 if normalized(entry.path) == normalized(path):
                     self.model.entries[row] = replace(entry, path=dest, name=name,
-                        archive=archive_name(name), hidden=entry.hidden or name.startswith("."))
-                    old_key,new_key = normalized(path),normalized(dest)
+                                                      archive=archive_name(name),
+                                                      hidden=entry.hidden or name.startswith("."))
+                    old_key, new_key = normalized(path), normalized(dest)
                     for proxy in self.proxies:
-                        for values in (proxy.duplicate_paths,proxy.archive_match_paths):
+                        for values in (proxy.duplicate_paths, proxy.archive_match_paths):
                             if old_key in values:
                                 values.discard(old_key)
                                 values.add(new_key)
-                    self.model.dataChanged.emit(self.model.index(row,0),self.model.index(row,3),[])
+                    self.model.dataChanged.emit(self.model.index(row, 0), self.model.index(row, 3), [])
                     break
             self.next_rename()
-        self.submit(work,done)
+
+        self.submit(work, done)
 
     def preview_animation_finished(self):
         if self.preview_open:
@@ -2126,7 +2186,7 @@ class Explorer(QMainWindow):
         self.preview_animation.stop()
         if opened:
             original = self.splitter.sizes()
-            target = max(180,min(self.preview_width,max(180,sum(original)//2)))
+            target = max(180, min(self.preview_width, max(180, sum(original) // 2)))
             self.preview_panel.setMaximumWidth(0)
             self.preview_panel.show()
             self.preview_animation.setStartValue(0)
@@ -2148,10 +2208,10 @@ class Explorer(QMainWindow):
         available = sum(sizes)
         if available > target:
             keep = sizes[0]
-            rest = max(1,sizes[1]+sizes[2])
-            middle = max(0,available-target-keep)
-            self.splitter.setSizes([keep,int(middle*sizes[1]/rest),
-                                   middle-int(middle*sizes[1]/rest),target])
+            rest = max(1, sizes[1] + sizes[2])
+            middle = max(0, available - target - keep)
+            self.splitter.setSizes([keep, int(middle * sizes[1] / rest),
+                                    middle - int(middle * sizes[1] / rest), target])
 
     def stop_preview(self):
         self.preview_timer.stop()
@@ -2166,7 +2226,7 @@ class Explorer(QMainWindow):
             return
         entries = self.selected(self.active_view) if self.active_view is not None else []
         entry = entries[0] if len(entries) == 1 else None
-        key = (entry.path,entry.size,entry.modified) if entry and not entry.folder else None
+        key = (entry.path, entry.size, entry.modified) if entry and not entry.folder else None
         if key == self.preview_key:
             return
         self.stop_preview()
@@ -2192,7 +2252,8 @@ class Explorer(QMainWindow):
         self.preview_job = stop
         self.preview_inflight = True
         self.preview_pending = False
-        def done(result,error):
+
+        def done(result, error):
             self.preview_inflight = False
             if not self.preview_open or self.preview_job is not stop or stop.is_set():
                 if self.preview_open and self.preview_pending:
@@ -2204,8 +2265,10 @@ class Explorer(QMainWindow):
                 return
             image, original = result
             self.preview_label.set_image(image)
-            self.preview_details.setText(f"{Path(key[0]).name}\n{original.width():,} × {original.height():,} px  |  {readable_size(key[1])}")
-        self.submit(lambda: read_image_preview(key[0],stop.is_set),done)
+            self.preview_details.setText(
+                f"{Path(key[0]).name}\n{original.width():,} × {original.height():,} px  |  {readable_size(key[1])}")
+
+        self.submit(lambda: read_image_preview(key[0], stop.is_set), done)
 
     def rename(self):
         if self.editing() or not self.current:
@@ -2225,17 +2288,20 @@ class Explorer(QMainWindow):
             self.warn("Invalid name")
             return
         dest = os.path.join(self.current, name)
+
         def work():
             if os.path.lexists(dest) and normalized(dest) != normalized(e.path):
                 raise FileExistsError(dest)
             os.rename(e.path, dest)
+
         self.operation("Renaming", work)
 
     def delete(self):
         if self.editing() or not self.current:
             return
         paths = [e.path for e in self.selected()]
-        if paths and QMessageBox.question(self, APP, f"Move {len(paths)} item(s) to the Recycle Bin?") == QMessageBox.Yes:
+        if paths and QMessageBox.question(self, APP,
+                                          f"Move {len(paths)} item(s) to the Recycle Bin?") == QMessageBox.Yes:
             self.operation("Recycling", lambda: recycle(paths))
 
     def restore_recycled(self):
@@ -2244,6 +2310,7 @@ class Explorer(QMainWindow):
             if os.name == "nt":
                 os.startfile("shell:RecycleBinFolder")
             return
+
         def done(records, error):
             if error:
                 self.warn(error)
@@ -2253,10 +2320,11 @@ class Explorer(QMainWindow):
                 return
             labels = [f"{date}  |  {relative}  [{key[:8]}]" for date, relative, key in records]
             label, ok = QInputDialog.getItem(self, "Restore from network recycle",
-                "Select an item to restore to its original location:", labels, 0, False)
+                                             "Select an item to restore to its original location:", labels, 0, False)
             if ok:
                 key = records[labels.index(label)][2]
                 self.operation("Restoring", lambda: restore_share_item(root, key))
+
         self.submit(lambda: share_trash_entries(root), done)
 
     def create_zip(self):
@@ -2296,13 +2364,14 @@ class Explorer(QMainWindow):
     def ask_zip_password(self, path, rejected):
         message = ("The previous password did not work." if rejected else "This ZIP is encrypted.")
         text, ok = QInputDialog.getText(self, "ZIP password",
-            f"{Path(path).name}\n{message}\nEnter password (Cancel skips this archive):",
-            QLineEdit.Password)
+                                        f"{Path(path).name}\n{message}\nEnter password (Cancel skips this archive):",
+                                        QLineEdit.Password)
         return text.encode("utf-8") if ok and text else None
 
     def try_archive(self, item, password):
         path, destination, remove_source = item
         self.statusBar().showMessage(f"Extracting {Path(path).name}...")
+
         def done(result, error):
             if error:
                 self.extract_errors.append(f"{Path(path).name}: {error}")
@@ -2319,6 +2388,7 @@ class Explorer(QMainWindow):
                 if result.error:
                     self.extract_errors.append(result.error)
             self.next_archive()
+
         self.submit(lambda: extract_one(path, destination, remove_source, password), done)
 
     def extract_zip(self):
@@ -2362,6 +2432,7 @@ class Explorer(QMainWindow):
         self.settings.sync()
         super().closeEvent(event)
 
+
 def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
@@ -2379,6 +2450,7 @@ def main():
     window = Explorer()
     window.show()
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()

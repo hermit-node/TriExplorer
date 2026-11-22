@@ -1,2 +1,2 @@
 PySide6>=6.8,<7
-pyzipper>=0.3.6,<1
+pyzipper>=0.3.6
