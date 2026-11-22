@@ -4,9 +4,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 from PySide6.QtGui import QIcon
+from runtime_paths import bundled_asset
 
 APP_ID = "KHzz.TriExplorer"
-ICON_PATH = Path(__file__).resolve().parent / "assets" / "triexplorer.ico"
+ICON_PATH = bundled_asset("assets", "triexplorer.ico")
 
 
 def app_icon():

@@ -67,3 +67,23 @@ Local settings.ini is intentionally gitignored; settings.example.ini is versione
 ## Source layout
 
 For surgical edits, see [ARCHITECTURE.md](ARCHITECTURE.md). The eight-line main.py starts the app, explorer.py owns the window, controllers/ handles UI features, and services/ performs filesystem operations. Source SVG and Windows taskbar icon are in assets/.
+
+## Portable Windows release
+
+Download TriExplorer-v0.1.0-win64.zip from Releases and extract into a
+writable directory. Keep these three files together:
+
+- TriExplorer.exe: self-contained PyInstaller one-file Windows executable
+  (no Python installation required; Qt assets packaged internally)
+- settings.ini: user-editable configuration, window state and pane settings
+- TriExplorer.sqlite3: local folder-size and SHA cache (starts empty)
+
+The frozen app resolves settings and relative SQLite paths beside the EXE,
+not AppData, the working directory or PyInstaller temporary extraction.
+The frozen build never migrates registry settings. Network recycle remains
+on the source share and is configured via network/trash_name in settings.ini.
+
+Windows build command (requires requirements.txt plus PyInstaller):
+    py -3.14 -B build_portable.py --version 0.1.0
+
+The GitHub Actions release workflow runs the same build and regression suite.

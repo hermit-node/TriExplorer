@@ -225,3 +225,10 @@ __marimo__/
 .idea
 # Machine/user preferences (see settings.example.ini)
 /settings.ini
+
+# Portable release output and SQLite runtime state
+/dist/
+/build/
+/*.spec
+/*.sqlite3
+/*.sqlite3-*

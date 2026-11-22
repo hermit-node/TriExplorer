@@ -173,6 +173,33 @@ class ExplorerTest(unittest.TestCase):
                 w.pool.waitForDone(5000)
                 app.processEvents()
 
+    def test_portable_runtime_locations(self):
+        import runtime_paths
+        from unittest.mock import patch
+        import settings as settings_module
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            fake_executable = root / "TriExplorer.exe"
+            with patch.object(runtime_paths.sys, "frozen", True, create=True), \
+                 patch.object(runtime_paths.sys, "executable", str(fake_executable)):
+                self.assertEqual(runtime_paths.application_directory(), root)
+                self.assertEqual(settings_module.settings_file(), root / "settings.ini")
+                cfg = QSettings(str(root / "settings.ini"), QSettings.IniFormat)
+                cfg.setValue("cache/sqlite_path", "auto")
+                self.assertEqual(settings_module.configured_cache_path(cfg),
+                                 root / "TriExplorer.sqlite3")
+                cfg.setValue("cache/sqlite_path", "subfolder/data.sqlite3")
+                self.assertEqual(settings_module.configured_cache_path(cfg),
+                                 root / "subfolder" / "data.sqlite3")
+                with patch.object(settings_module, "QSettings",
+                                  side_effect=lambda *args: QSettings(str(root / "settings.ini"), QSettings.IniFormat)):
+                    settings_module.open_settings()
+                self.assertTrue((root / "settings.ini").is_file())
+                self.assertEqual(cfg.value("meta/legacy_imported", False, type=bool), True)
+            with patch.object(runtime_paths.sys, "_MEIPASS", str(root), create=True):
+                self.assertEqual(runtime_paths.bundled_asset("assets", "triexplorer.ico"),
+                                 root / "assets" / "triexplorer.ico")
+
     def test_taskbar_icon(self):
         import app_icons
         from PySide6.QtGui import QIcon
