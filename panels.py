@@ -21,35 +21,16 @@ from PySide6.QtWidgets import (
     QHeaderView, QSizePolicy
 )
 from filters import PANE_MODES, CATEGORY_SUFFIXES
+from file_types import PC, Entry, normalized, readable_size
 
-PC = ""
 PATH_ROLE = Qt.ItemDataRole.UserRole
 SORT_ROLE = int(PATH_ROLE) + 1
 LOADED_ROLE = int(PATH_ROLE) + 2
 
-def normalized(path):
-    return os.path.normcase(os.path.normpath(path)) if path else PC
 
 
-def readable_size(n):
-    if n is None:
-        return ""
-    value = float(n)
-    for unit in ("B", "KB", "MB", "GB", "TB", "PB"):
-        if value < 1024 or unit == "PB":
-            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
-        value /= 1024
 
 
-@dataclass(frozen=True)
-class Entry:
-    path: str
-    name: str
-    folder: bool
-    archive: bool = False
-    size: int | None = None
-    modified: float | None = None
-    hidden: bool = False
 
 
 class Files(QAbstractTableModel):

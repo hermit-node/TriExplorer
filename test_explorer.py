@@ -9,7 +9,43 @@ import zipfile
 from pathlib import Path
 from PySide6.QtCore import QSettings, Qt, QPointF, QMimeData, QUrl
 from PySide6.QtWidgets import QApplication
-import main
+import explorer as main
+import appcore
+import settings as app_settings
+from services import recycle as recycle_service, archive as archive_service
+from controllers import duplicate_actions, file_actions, preview
+
+class RecyclePatch:
+    # Update the references where recycle is looked up, not just one import alias.
+    def __init__(self, *args, **kwargs):
+        self.primary = patch.object(appcore, "recycle", *args, **kwargs)
+        self.extra = []
+    def start(self):
+        mock = self.primary.start()
+        try:
+            for module in (duplicate_actions, file_actions, archive_service):
+                p = patch.object(module, "recycle", new=mock)
+                p.start()
+                self.extra.append(p)
+        except Exception:
+            self.stop()
+            raise
+        return mock
+    def stop(self):
+        for p in reversed(self.extra):
+            p.stop()
+        self.extra.clear()
+        self.primary.stop()
+    def __enter__(self):
+        return self.start()
+    def __exit__(self, *_):
+        self.stop()
+        return False
+
+def patch_recycle(*args, **kwargs):
+    return RecyclePatch(*args, **kwargs)
+
+
 
 app = QApplication.instance() or QApplication([])
 app.setStyle("Fusion")
@@ -30,7 +66,7 @@ class ExplorerTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         ini = str(Path(temp.name) / "test.ini")
-        factory = patch.object(main, "QSettings", side_effect=lambda *args: QSettings(ini, QSettings.IniFormat))
+        factory = patch.object(app_settings, "QSettings", side_effect=lambda *args: QSettings(ini, QSettings.IniFormat))
         factory.start()
         self.addCleanup(factory.stop)
         size_factory = patch.object(main.folder_sizes, "cache_path", return_value=Path(temp.name) / "sizes.sqlite3")
@@ -102,7 +138,7 @@ class ExplorerTest(unittest.TestCase):
                     view.setCurrentIndex(i)
                     view.selectionModel().select(i,QItemSelectionModel.ClearAndSelect|QItemSelectionModel.Rows)
                     w.set_active(view)
-                with patch.object(main,"read_image_preview",wraps=main.read_image_preview) as read:
+                with patch.object(preview,"read_image_preview",wraps=preview.read_image_preview) as read:
                     self.assertFalse(w.preview_open)
                     select(0)
                     app.processEvents()
@@ -137,6 +173,25 @@ class ExplorerTest(unittest.TestCase):
                 w.pool.waitForDone(5000)
                 app.processEvents()
 
+    def test_taskbar_icon(self):
+        import app_icons
+        from PySide6.QtGui import QIcon
+        self.assertEqual(app_icons.APP_ID, "KHzz.TriExplorer")
+        self.assertTrue(app_icons.ICON_PATH.is_file())
+        data = app_icons.ICON_PATH.read_bytes()
+        self.assertEqual(data[:4], bytes([0, 0, 1, 0]))
+        self.assertGreater(int.from_bytes(data[4:6], "little"), 5)
+        icon = app_icons.app_icon()
+        self.assertFalse(icon.isNull())
+        for size in (16, 32, 48, 256):
+            self.assertFalse(icon.pixmap(size, size).isNull())
+        w = main.Explorer()
+        try:
+            self.assertFalse(w.windowIcon().isNull())
+        finally:
+            w.close()
+            w.pool.waitForDone(5000)
+
     def test_portable_settings_and_panel_module(self):
         import panels
         from PySide6.QtCore import QSettings
@@ -147,8 +202,8 @@ class ExplorerTest(unittest.TestCase):
         self.assertIs(main.create_table_pane, panels.create_table_pane)
         self.assertTrue(main.SETTINGS_PATH.is_absolute())
         self.assertEqual(main.SETTINGS_PATH.name, "settings.ini")
-        old_name = main.NETWORK_TRASH
-        self.addCleanup(setattr, main, "NETWORK_TRASH", old_name)
+        old_name = appcore.NETWORK_TRASH
+        self.addCleanup(setattr, appcore, "NETWORK_TRASH", old_name)
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             ini = QSettings(str(root / "preferences.ini"), QSettings.IniFormat)
@@ -167,12 +222,12 @@ class ExplorerTest(unittest.TestCase):
             ))
             ini.setValue("network/trash_name", ".CustomRecycle")
             main.configure_network_trash(ini)
-            self.assertEqual(main.NETWORK_TRASH, ".CustomRecycle")
+            self.assertEqual(appcore.NETWORK_TRASH, ".CustomRecycle")
             self.assertIn(".customrecycle", main.folder_sizes.EXCLUDED)
             self.assertIn(".customrecycle", main.duplicates.SKIP_DIRS)
             a = root / "data.bin"
             a.write_bytes(b"abc")
-            with patch.object(main, "network_root", return_value=root):
+            with patch.object(recycle_service, "network_root", return_value=root):
                 self.assertFalse(main.recycle([str(a)]))
             self.assertFalse(a.exists())
             self.assertEqual(main.share_trash_entries(root)[0][1], "data.bin")
@@ -479,7 +534,7 @@ class ExplorerTest(unittest.TestCase):
                     for path in paths:
                         main.share_recycle(path,root)
                     return []
-                with patch.object(main,"recycle",side_effect=recycle_fixture):
+                with patch_recycle(side_effect=recycle_fixture):
                     w.cleanup_archive_pairs()
                     wait_for(lambda: not w.duplicate_cleanup and not w.workers)
                 self.assertEqual(prompts,[("One",False),("Three",True),("Four",True)])
@@ -517,7 +572,7 @@ class ExplorerTest(unittest.TestCase):
                 (folder/"data.bin").write_bytes(b"y"*20000)
                 warnings=[]
                 w.warn=warnings.append
-                with patch.object(main,"recycle") as recycler:
+                with patch_recycle() as recycler:
                     w.cleanup_archive_pairs()
                     wait_for(lambda: not w.duplicate_cleanup and not w.workers)
                     recycler.assert_not_called()
@@ -547,7 +602,7 @@ class ExplorerTest(unittest.TestCase):
             sub.mkdir()
             (sub / "thing.txt").write_bytes(b"abc")
             (root / ".hidden.txt").write_bytes(b"abc")
-            trash = root / main.NETWORK_TRASH
+            trash = root / appcore.NETWORK_TRASH
             trash.mkdir()
             (trash / "dont-touch.txt").write_bytes(b"abc")
             with patch.object(duplicates, "hash_file", wraps=duplicates.hash_file) as hashing:
@@ -604,7 +659,7 @@ class ExplorerTest(unittest.TestCase):
                     wait_for(lambda: not w.workers)
                     finder.assert_not_called()
                     self.assertEqual(w.proxies[0].rowCount(), 2)
-                with patch.object(main, "recycle", side_effect=lambda paths: [main.share_recycle(p, root) for p in paths] and []):
+                with patch_recycle( side_effect=lambda paths: [main.share_recycle(p, root) for p in paths] and []):
                     w.cleanup_duplicates(preferred=str(root / "keep (1).txt"))
                     wait_for(lambda: not w.duplicate_cleanup and not w.workers)
                 self.assertTrue((root / "keep (1).txt").exists())
@@ -624,12 +679,12 @@ class ExplorerTest(unittest.TestCase):
             folder.mkdir()
             f = folder / "sample.zip"
             f.write_bytes(b"fixture")
-            with patch.object(main, "network_root", return_value=root):
+            with patch.object(recycle_service, "network_root", return_value=root):
                 self.assertEqual(main.recycle([str(f)]), [])
                 self.assertFalse(f.exists())
                 records = main.share_trash_entries(root)
                 self.assertEqual(records[0][1], "sub/sample.zip")
-                self.assertFalse(any(e.name == main.NETWORK_TRASH for e in main.scan(str(root))))
+                self.assertFalse(any(e.name == appcore.NETWORK_TRASH for e in main.scan(str(root))))
                 key = records[0][2]
                 f.write_bytes(b"collision")
                 with self.assertRaises(FileExistsError):
@@ -643,7 +698,7 @@ class ExplorerTest(unittest.TestCase):
                 main.restore_share_item(root, main.share_trash_entries(root)[0][2])
                 self.assertEqual(f.read_bytes(), b"fixture")
                 self.assertEqual(main.share_trash_entries(root), [])
-                self.assertTrue(main.recycle([str(root / main.NETWORK_TRASH)]))
+                self.assertTrue(main.recycle([str(root / appcore.NETWORK_TRASH)]))
 
     def test_operations(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -740,7 +795,7 @@ class ExplorerTest(unittest.TestCase):
                 self.assertEqual((d / "Root" / "a.txt").read_text(), "value")
                 valid.unlink()
                 return []
-            with patch.object(main, "recycle", side_effect=recycle_fixture) as recycle:
+            with patch_recycle( side_effect=recycle_fixture) as recycle:
                 errors = main.extract_archives([str(bad), str(valid), str(blocked)], str(d), True)
                 self.assertEqual(len(errors), 2)
                 recycle.assert_called_once_with([str(valid)])
@@ -749,14 +804,14 @@ class ExplorerTest(unittest.TestCase):
             preserve = d / "preserve.zip"
             with zipfile.ZipFile(preserve, "w") as z:
                 z.writestr("a.txt", "value")
-            with patch.object(main, "recycle") as recycle:
+            with patch_recycle() as recycle:
                 self.assertEqual(main.extract_archives([str(preserve)], str(d)), [])
                 recycle.assert_not_called()
             self.assertTrue(preserve.exists())
             failed_recycle = d / "failed-recycle.zip"
             with zipfile.ZipFile(failed_recycle, "w") as z:
                 z.writestr("a.txt", "value")
-            with patch.object(main, "recycle", return_value=["Access denied"]):
+            with patch_recycle( return_value=["Access denied"]):
                 errors = main.extract_archives([str(failed_recycle)], str(d), True)
             self.assertIn("extracted successfully", errors[0])
             self.assertTrue(failed_recycle.exists())
@@ -808,7 +863,7 @@ class ExplorerTest(unittest.TestCase):
                         Path(path).unlink()
                         recycled.append(Path(path).stem)
                     return []
-                with patch.object(main, "recycle", side_effect=recycle_fixture):
+                with patch_recycle( side_effect=recycle_fixture):
                     w.do_extract([a,b,c], str(base), True)
                     wait_for(lambda: not w.extract_running)
                     self.assertEqual(w.zip_password, b"alpha")
@@ -877,7 +932,7 @@ class ExplorerTest(unittest.TestCase):
                     return []
                 warnings = []
                 w.warn = warnings.append
-                recycler = patch.object(main, "recycle", side_effect=recycle_fixture)
+                recycler = patch_recycle( side_effect=recycle_fixture)
                 recycler.start()
                 self.addCleanup(recycler.stop)
                 e = Drop(right, archives[:2], left.viewport().rect().bottomRight())

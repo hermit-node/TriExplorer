@@ -63,3 +63,7 @@ field, image-preview label, and create_table_pane factory. filters.py is
 the single source of view presets and file-extension categories. main.py
 coordinates navigation, filesystem operations, and background work.
 Local settings.ini is intentionally gitignored; settings.example.ini is versioned.
+
+## Source layout
+
+For surgical edits, see [ARCHITECTURE.md](ARCHITECTURE.md). The eight-line main.py starts the app, explorer.py owns the window, controllers/ handles UI features, and services/ performs filesystem operations. Source SVG and Windows taskbar icon are in assets/.
