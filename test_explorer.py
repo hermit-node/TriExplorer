@@ -178,7 +178,7 @@ class ExplorerTest(unittest.TestCase):
         from unittest.mock import patch
         import settings as settings_module
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
             fake_executable = root / "TriExplorer.exe"
             with patch.object(runtime_paths.sys, "frozen", True, create=True), \
                  patch.object(runtime_paths.sys, "executable", str(fake_executable)):
