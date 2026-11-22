@@ -5,7 +5,6 @@ Feature methods live in controllers/; filesystem helpers in appcore.py.
 from __future__ import annotations
 
 from appcore import *  # compatibility export for existing tools and tests
-import app_icons
 from controllers.duplicate_actions import DuplicateActionsMixin
 from controllers.sidebar import SidebarMixin
 from controllers.navigation import NavigationMixin
@@ -14,6 +13,7 @@ from controllers.file_actions import FileActionsMixin
 from controllers.preview import PreviewMixin
 from controllers.archive_actions import ArchiveActionsMixin
 from controllers.layout import LayoutMixin
+import app_icons
 
 
 class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMixin, FileActionsMixin, PreviewMixin, ArchiveActionsMixin, LayoutMixin, QMainWindow):
@@ -152,18 +152,3 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
             self.settings.setValue(f"pane/{i}/descending", view.header().sortIndicatorOrder() == Qt.DescendingOrder)
         self.settings.sync()
         super().closeEvent(event)
-
-
-def main():
-    app_icons.register_taskbar_identity()
-    app = QApplication(sys.argv)
-    app.setApplicationName(APP)
-    app.setOrganizationName("KHzz")
-    app.setWindowIcon(app_icons.app_icon())
-    app.setStyle("Fusion")
-    palette = stylesheet.import_palette()
-    app.setPalette(palette)
-    app.setStyleSheet(stylesheet.STYLE)
-    window = Explorer()
-    window.show()
-    sys.exit(app.exec())
