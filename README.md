@@ -14,7 +14,7 @@ Double-click launch.bat on KHzz. It uses the existing Python 3.14 / PySide6 inst
 - File operations run on worker threads. Existing targets are not silently replaced. Moves and recycling ask for confirmation. No permanent-delete fallback when recycling fails.
 - Classification is by case-insensitive file extension, including compound archive extensions. DOCX, XLSX and other ordinary packaged documents stay in the files pane.
 
-![Preview Sample](https://imgur.com/a/jrDEYGQ)
+![Preview Sample](https://i.imgur.com/uJk7Sjl.png)
 ## Tests
 Run py -3.14 -B test_explorer.py. The test creates fixtures in a temporary directory and checks filtering, sorting, navigation, monitoring, transfers, and ZIP safety. No pre-existing files are modified.
 
