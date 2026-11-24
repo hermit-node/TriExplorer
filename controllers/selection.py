@@ -82,6 +82,8 @@ class SelectionMixin:
             a = menu.addAction(label)
             a.triggered.connect(fn)
         entry = self.model.entry(view.model().mapToSource(index)) if index.isValid() else None
+        if self.current:
+            menu.addAction("Batch Rename + Regex", lambda: self.batch_rename(view, entry))
         if entry and entry.folder:
             menu.addSeparator()
             self.pin_action(menu, entry.path)

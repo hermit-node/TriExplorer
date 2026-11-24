@@ -11,6 +11,20 @@ from appcore import (
 )
 
 class FileActionsMixin:
+    def batch_rename(self, view=None, entry=None):
+        if not self.current or self.editing():
+            return
+        from batch_rename.dialog import BatchRenameDialog
+        directory = entry.path if entry and entry.folder else self.current
+        paths = [e.path for e in self.selected(view) if not e.folder] if entry and not entry.folder else None
+        try:
+            BatchRenameDialog(self, directory, paths).exec()
+        except Exception as exc:
+            self.warn(str(exc))
+        self.refresh()
+        self.refresh_tree_branch()
+
+
     def copy_path(self):
         paths = [e.path for e in self.selected()]
         if paths:
