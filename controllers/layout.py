@@ -75,12 +75,6 @@ class LayoutMixin:
                          ("Recycle", self.delete), ("Restore", self.restore_recycled), ("Create ZIP", self.create_zip),
                          ("Pin folder", self.pin)):
             actions.addWidget(self.tool(text, fn))
-        self.containment_button = self.tool("Include contained archives", lambda: None)
-        self.containment_button.setCheckable(True)
-        self.containment_button.setToolTip("Also match archives fully represented by a folder containing additional files")
-        self.containment_button.toggled.connect(self.set_archive_containment)
-        actions.addWidget(self.containment_button)
-        self.containment_button.hide()
         actions.addStretch()
         hidden = self.tool("Hidden items", self.toggle_hidden)
         hidden.setCheckable(True)
@@ -161,6 +155,8 @@ class LayoutMixin:
         self.proxies = []
         self.counts = []
         self.mode_selectors = []
+        self.containment_buttons = []
+        self.archive_footers = []
         for i, default_mode in enumerate(("default", "archives")):
             table = create_table_pane(
                 i, default_mode, self.settings, self.model, self.show_hidden, self
@@ -185,6 +181,9 @@ class LayoutMixin:
             self.proxies.append(proxy)
             self.counts.append(count)
             self.mode_selectors.append(selector)
+            self.containment_buttons.append(table.containment)
+            self.archive_footers.append(table.footer)
+            table.containment.toggled.connect(lambda enabled, idx=i: self.set_archive_containment(idx, enabled))
             selector.currentIndexChanged.connect(lambda _, idx=i: self.change_pane_mode(idx))
         self.active_view = self.views[0]
         self.preview_panel, preview_layout = self.panel()
@@ -209,7 +208,6 @@ class LayoutMixin:
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 3)
         self.splitter.setStretchFactor(2, 2)
-        self.containment_button.setVisible(any(p.mode == "archive_matches" for p in self.proxies))
         self.build_quick()
         for key, fn in (("Alt+Left", self.back), ("Alt+Right", self.forward), ("Alt+Up", self.up),
                         ("F5", self.refresh), ("Alt+P", lambda: self.preview_button.toggle()),
@@ -260,14 +258,14 @@ class LayoutMixin:
         mode = self.mode_selectors[i].currentData()
         proxy = self.proxies[i]
         proxy.set_mode(mode)
-        self.containment_button.setVisible(any(p.mode == "archive_matches" for p in self.proxies))
+        self.archive_footers[i].setVisible(mode == "archive_matches")
         if mode in ("alphabetical", "archive_matches"):
             self.views[i].sortByColumn(0, Qt.AscendingOrder)
         self.update_counts()
         self.settings.setValue(f"pane/{i}/mode", mode)
-        if mode == "archive_matches":
-            self.scan_archive_matches()
-        elif not any(p.mode == "archive_matches" for p in self.proxies):
+        if any(p.mode == "archive_matches" for p in self.proxies):
+            self.scan_archive_matches(force=False)
+        else:
             self.cancel_archive_matches()
         if mode == "duplicates":
             self.scan_duplicate_view()

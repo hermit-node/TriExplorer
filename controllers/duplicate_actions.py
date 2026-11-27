@@ -97,10 +97,21 @@ class DuplicateActionsMixin:
             self.archive_match_job = None
 
 
-    def set_archive_containment(self, enabled):
-        self.archive_contained = enabled
-        if any(p.mode == "archive_matches" for p in self.proxies):
-            self.scan_archive_matches()
+    def set_archive_containment(self, index, enabled):
+        self.archive_contained[index] = enabled
+        if self.proxies[index].mode == "archive_matches":
+            self.scan_archive_matches(force=False)
+
+
+    def archive_pairs_for(self, view=None):
+        view = self.active_view if view is None else view
+        index = self.views.index(view) if view in self.views else 0
+        # Direct callers outside archive mode use the first active archive pane.
+        if self.proxies[index].mode != "archive_matches":
+            index = next((i for i, p in enumerate(self.proxies)
+                          if p.mode == "archive_matches"), index)
+        return [m for m in self.archive_pairs
+                if self.archive_contained[index] or not m.contained]
 
 
     def show_archive_matches(self, view, with_password=False):
@@ -113,7 +124,7 @@ class DuplicateActionsMixin:
             selector.setCurrentIndex(selector.findData("archive_matches"))
             selector.blockSignals(False)
             self.proxies[self.views.index(view)].set_mode("archive_matches")
-            self.containment_button.show()
+            self.archive_footers[self.views.index(view)].show()
             view.sortByColumn(0, Qt.AscendingOrder)
             self.settings.setValue(f"pane/{self.views.index(view)}/mode", "archive_matches")
             self.scan_archive_matches(password_override=password.encode("utf-8"))
@@ -126,7 +137,9 @@ class DuplicateActionsMixin:
     def scan_archive_matches(self, force=True, password_override=None):
         if self.duplicate_cleanup or not self.current or not any(p.mode == "archive_matches" for p in self.proxies):
             return
-        scan_key = (normalized(self.current), self.show_hidden, self.archive_contained, tuple(sorted(
+        scan_key = (normalized(self.current), self.show_hidden,
+                    tuple((p.mode == "archive_matches", self.archive_contained[i])
+                          for i,p in enumerate(self.proxies)), tuple(sorted(
             (normalized(e.path), e.size if e.size is not None else -1,
              e.modified if e.modified is not None else -1)
             for e in self.model.entries)))
@@ -146,7 +159,8 @@ class DuplicateActionsMixin:
         archives = [(e.path, e.size) for e in entries if
                     not e.folder and e.name.lower().endswith((".zip", ".iso")) and e.size is not None]
         sizes = dict(self.model.folder_sizes)
-        allow_contained = self.archive_contained
+        allow_contained = any(p.mode == "archive_matches" and self.archive_contained[i]
+                              for i,p in enumerate(self.proxies))
         password = self.zip_password if password_override is None else password_override
         stop = Event()
         self.archive_match_job = stop
@@ -159,7 +173,9 @@ class DuplicateActionsMixin:
                 key = normalized(item)
                 note = f"{Path(other).name}: {match.status}"
                 self.model.archive_notes[key] = (self.model.archive_notes.get(key, "") + "\n" + note).strip()
-                for proxy in self.proxies:
+                for i, proxy in enumerate(self.proxies):
+                    if match.contained and not self.archive_contained[i]:
+                        continue
                     proxy.archive_match_paths.add(key)
                     if proxy.mode == "archive_matches":
                         proxy.invalidate()
@@ -207,13 +223,13 @@ class DuplicateActionsMixin:
         self.submit(run, done, progress)
 
 
-    def cleanup_archive_pairs(self, preferred=None):
+    def cleanup_archive_pairs(self, preferred=None, view=None):
         if self.duplicate_cleanup or not self.current:
             return
         if self.archive_match_job is not None:
             self.statusBar().showMessage("Wait for the ZIP / folder scan to finish before cleanup.")
             return
-        pairs = [m for m in self.archive_pairs if m.recyclable and (self.archive_contained or not m.contained)]
+        pairs = [m for m in self.archive_pairs_for(view) if m.recyclable]
         if preferred:
             pairs = [m for m in pairs if normalized(preferred) in (normalized(m.archive), normalized(m.folder))]
         if not pairs:

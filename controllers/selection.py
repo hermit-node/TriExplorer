@@ -111,12 +111,15 @@ class SelectionMixin:
                 dup.addAction("Show skipped files / scan errors",
                               lambda: self.warn("\n".join(self.duplicate_scan_errors[:100])))
             if view.model().mode == "archive_matches":
-                cleanup = dup.addAction("Recycle matching archives - keep folders", lambda: self.cleanup_archive_pairs())
-                cleanup.setEnabled(self.archive_match_job is None and bool(self.archive_pairs))
+                cleanup = dup.addAction("Recycle matching archives - keep folders", lambda: self.cleanup_archive_pairs(view=view))
+                cleanup.setEnabled(self.archive_match_job is None and any(m.recyclable for m in self.archive_pairs_for(view)))
                 if entry:
                     action = menu.addAction("Recycle matching archive(s) - keep folder",
-                                            lambda: self.cleanup_archive_pairs(entry.path))
-                    action.setEnabled(self.archive_match_job is None and not self.duplicate_cleanup)
+                                            lambda: self.cleanup_archive_pairs(entry.path, view=view))
+                    action.setEnabled(self.archive_match_job is None and not self.duplicate_cleanup
+                                      and any(m.recyclable and normalized(entry.path) in
+                                              (normalized(m.archive), normalized(m.folder))
+                                              for m in self.archive_pairs_for(view)))
                 exact = dup.addAction("Recycle identical files - keep one", lambda: self.cleanup_duplicates())
             else:
                 dup.addAction("Recycle duplicates - keep one", lambda: self.cleanup_duplicates())

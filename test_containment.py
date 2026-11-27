@@ -1,4 +1,4 @@
-﻿import io
+import io
 import tempfile
 import unittest
 import zipfile
@@ -87,13 +87,26 @@ class ContainmentTests(unittest.TestCase):
                 w.show_archive_matches(w.views[0])
                 wait_for(lambda: not w.workers)
                 self.assertFalse(w.archive_pairs)
-                self.assertFalse(w.containment_button.isChecked())
-                w.containment_button.click()
+                self.assertFalse(w.containment_buttons[0].isChecked())
+                w.containment_buttons[0].click()
                 wait_for(lambda: not w.workers)
                 self.assertEqual(len(w.archive_pairs),1)
                 self.assertTrue(w.archive_pairs[0].contained and w.archive_pairs[0].verified)
+                # Both panes may show archive matches but with independent options.
+                w.show_archive_matches(w.views[1])
+                wait_for(lambda: not w.workers)
+                self.assertEqual(w.proxies[0].rowCount(), 2)
+                self.assertEqual(w.proxies[1].rowCount(), 0)
+                self.assertTrue(w.archive_footers[0].isVisible())
+                self.assertTrue(w.archive_footers[1].isVisible())
+                self.assertFalse(w.containment_buttons[1].isChecked())
+                self.assertIn("0 verified / 0 pairs", w.counts[1].text())
+                self.assertIs(w.containment_buttons[0].parentWidget(), w.archive_footers[0])
+                self.assertGreater(w.archive_footers[0].geometry().top(), w.views[0].geometry().top())
                 with patch_recycle(return_value=[]) as recycler:
-                    w.cleanup_archive_pairs()
+                    w.cleanup_archive_pairs(view=w.views[1])
+                    recycler.assert_not_called()
+                    w.cleanup_archive_pairs(view=w.views[0])
                     wait_for(lambda: not w.workers and not w.duplicate_cleanup)
                     recycler.assert_called_once_with([str(z)])
                 self.assertEqual((folder/"data.txt").read_text(),"data")
