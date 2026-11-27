@@ -87,3 +87,14 @@ Windows build command (requires requirements.txt plus PyInstaller):
     py -3.14 -B build_portable.py --version 0.1.0
 
 The GitHub Actions release workflow runs the same build and regression suite.
+
+## Debug mode (automatic refresh disabled)
+
+Run `python main-debugmode.py` from the source checkout, or use
+`python main-debugmode.py --settings "C:/my-TOOLS/TriExplorer/settings.ini" --folder "Z:/problem-folder"`.
+The startup console prints the local session log path. Filesystem watcher
+notifications are logged but never trigger a reload. F5 and normal file
+operations still refresh. Logs include refresh callers, worker queue/run
+times, scan counts, model changes, and UI stalls. Debug mode uses a copy of
+settings.ini and its own empty SQLite cache in a local temporary session
+directory; the normal configuration and cache are not modified.

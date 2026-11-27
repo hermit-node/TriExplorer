@@ -17,9 +17,9 @@ import app_icons
 
 
 class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMixin, FileActionsMixin, PreviewMixin, ArchiveActionsMixin, LayoutMixin, QMainWindow):
-    def __init__(self):
+    def __init__(self, settings=None):
         super().__init__()
-        self.settings = open_settings()
+        self.settings = open_settings() if settings is None else settings
         configure_network_trash(self.settings)
         self.app_name = str(self.settings.value("app/name", APP, type=str)).strip() or APP
         self.setWindowTitle(self.app_name)

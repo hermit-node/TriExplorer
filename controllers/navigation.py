@@ -74,6 +74,9 @@ class NavigationMixin:
                 self.load_tree(item)
 
 
+    def should_watch_folder(self, remote):
+        return self.watcher_enabled and (not remote or self.network_watcher_enabled)
+
     def queue_watcher_refresh(self, path):
         # Coalesce event bursts without perpetually postponing refresh on busy shares.
         if self.watcher_enabled and (not self.current_is_network or self.network_watcher_enabled) and normalized(path) == normalized(self.current) and self.current:
@@ -146,7 +149,7 @@ class NavigationMixin:
                 self.model.replace(entries, sizes)
             else:
                 self.model.reconcile(entries, sizes)
-            if self.watcher_enabled and (not remote or self.network_watcher_enabled) and path and not any(normalized(p) == normalized(path) for p in self.watcher.directories()):
+            if self.should_watch_folder(remote) and path and not any(normalized(p) == normalized(path) for p in self.watcher.directories()):
                 self.watcher.addPath(path)
             self.update_counts()
             self.schedule_preview()
