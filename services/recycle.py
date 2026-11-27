@@ -106,6 +106,35 @@ def restore_share_item(root, entry_id):
     entry.rmdir()
 
 
+def purge_share_item(root, entry_id):
+    """Permanently remove one validated recycle record, never an arbitrary path."""
+    if len(entry_id) != 32 or any(c not in "0123456789abcdef" for c in entry_id):
+        raise ValueError("Invalid recycle entry")
+    entry = checked_trash(root) / entry_id
+    if entry.is_symlink() or getattr(entry, "is_junction", lambda: False)():
+        raise ValueError("Invalid recycle entry")
+    metadata = entry / "restore.json"
+    payload = entry / "payload"
+    if metadata.is_symlink() or getattr(metadata, "is_junction", lambda: False)():
+        raise ValueError("Invalid recycle metadata")
+    data = json.loads(metadata.read_text(encoding="utf-8"))
+    parts = data["original"].split("/")
+    if not all(valid_name(part) for part in parts) or parts[0].casefold() == NETWORK_TRASH.casefold():
+        raise ValueError("Invalid original path")
+    if {p.name for p in entry.iterdir()} != {"payload", "restore.json"}:
+        raise ValueError("Unexpected recycle entry contents")
+    if payload.is_symlink():
+        payload.unlink()
+    elif getattr(payload, "is_junction", lambda: False)():
+        payload.rmdir()
+    elif payload.is_dir():
+        shutil.rmtree(payload)
+    else:
+        payload.unlink()
+    metadata.unlink()
+    entry.rmdir()
+
+
 def recycle(paths):
     errors = []
     for path in paths:

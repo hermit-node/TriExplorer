@@ -69,6 +69,9 @@ class ExplorerTest(unittest.TestCase):
         factory = patch.object(app_settings, "QSettings", side_effect=lambda *args: QSettings(ini, QSettings.IniFormat))
         factory.start()
         self.addCleanup(factory.stop)
+        portable = patch.object(app_settings, "PortableIni", side_effect=lambda *_: QSettings(ini, QSettings.IniFormat))
+        portable.start()
+        self.addCleanup(portable.stop)
         size_factory = patch.object(main.folder_sizes, "cache_path", return_value=Path(temp.name) / "sizes.sqlite3")
         size_factory.start()
         self.addCleanup(size_factory.stop)
@@ -191,9 +194,11 @@ class ExplorerTest(unittest.TestCase):
                 cfg.setValue("cache/sqlite_path", "subfolder/data.sqlite3")
                 self.assertEqual(settings_module.configured_cache_path(cfg),
                                  root / "subfolder" / "data.sqlite3")
-                with patch.object(settings_module, "QSettings",
-                                  side_effect=lambda *args: QSettings(str(root / "settings.ini"), QSettings.IniFormat)):
+                cfg.sync()
+                from portable_ini import PortableIni
+                with patch.object(settings_module, "PortableIni", new=PortableIni):
                     settings_module.open_settings()
+                cfg.sync()
                 self.assertTrue((root / "settings.ini").is_file())
                 self.assertEqual(cfg.value("meta/legacy_imported", False, type=bool), True)
             with patch.object(runtime_paths.sys, "_MEIPASS", str(root), create=True):
@@ -1059,7 +1064,8 @@ class ExplorerTest(unittest.TestCase):
             try:
                 wait_for(lambda: not w.workers)
                 original = [w.quick.topLevelItem(i).data(0, main.PATH_ROLE)
-                            for i in range(w.quick.topLevelItemCount())]
+                            for i in range(w.quick.topLevelItemCount())
+                            if w.quick.topLevelItem(i).data(0, main.PATH_ROLE) is not None]
                 for path in original:
                     menu = QMenu()
                     w.pin_action(menu, path)

@@ -8,7 +8,21 @@ from appcore import (
     normalized, os, scan
 )
 
+RECYCLE_ROLE = int(PATH_ROLE) + 20
+
 class SidebarMixin:
+    def quick_activated(self, item, _column=0):
+        if item.data(0, RECYCLE_ROLE):
+            self.open_recycle_bin()
+        else:
+            self.navigate(item.data(0, PATH_ROLE))
+
+    def open_recycle_bin(self):
+        if self.rename_busy:
+            return
+        from recycle_dialog import RecycleDialog
+        RecycleDialog(self).exec()
+
     def build_quick(self):
         self.quick.clear()
         defaults = [("This PC", PC)]
@@ -36,10 +50,12 @@ class SidebarMixin:
             item.setData(0, PATH_ROLE, path)
             item.setToolTip(0, path or "This PC")
             self.quick.addTopLevelItem(item)
-        if not locations:
-            item = QTreeWidgetItem(["Right-click to add folders"])
-            item.setFlags(Qt.NoItemFlags)
-            self.quick.addTopLevelItem(item)
+        recycle_item = QTreeWidgetItem(["Recycle Bin"])
+        recycle_item.setData(0, RECYCLE_ROLE, True)
+        recycle_item.setIcon(0, self.style().standardIcon(self.style().StandardPixmap.SP_TrashIcon))
+        recycle_item.setToolTip(0, "Recover or permanently delete recycled files")
+        index = 1 if locations and locations[0][1] == PC else 0
+        self.quick.insertTopLevelItem(index, recycle_item)
 
 
     def pin_action(self, menu, path):
@@ -54,6 +70,10 @@ class SidebarMixin:
     def quick_menu(self, pos):
         item = self.quick.itemAt(pos)
         menu = QMenu(self)
+        if item and item.data(0, RECYCLE_ROLE):
+            menu.addAction("Open Recycle Bin", self.open_recycle_bin)
+            menu.exec(self.quick.viewport().mapToGlobal(pos))
+            return
         if item and item.data(0, PATH_ROLE) is not None:
             self.pin_action(menu, item.data(0, PATH_ROLE))
             menu.addSeparator()
@@ -77,7 +97,8 @@ class SidebarMixin:
     def save_pins(self):
         self.settings.setValue("pins", self.pins)
         self.settings.setValue("hidden_default_pins", self.hidden_default_pins)
-        self.settings.sync()
+        if self.settings.sync() is False:
+            self.warn("Settings could not be saved: " + self.settings.last_error)
         self.build_quick()
 
 

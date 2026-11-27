@@ -98,3 +98,9 @@ operations still refresh. Logs include refresh callers, worker queue/run
 times, scan counts, model changes, and UI stalls. Debug mode uses a copy of
 settings.ini and its own empty SQLite cache in a local temporary session
 directory; the normal configuration and cache are not modified.
+
+## Recycle Bin and portable settings
+
+Quick Access includes a Recycle Bin beneath This PC. The combined view shows Windows Shell and discovered network-share recycle entries, with a source column and filter. Restore returns selected items to their original locations; permanent deletion requires confirmation. Unavailable shares are reported, not treated as empty.
+
+Settings remain beside the application. Qt serializes a local staging copy, then a nonblocking OS write guard and atomic replace publish only modified keys to the portable INI. Legacy Qt locks are never removed automatically; a busy or stale lock produces a warning instead of waiting recursively. Older builds should not be used concurrently with the new writer. Startup checks the last location in a worker.

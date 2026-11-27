@@ -16,6 +16,10 @@ from controllers.layout import LayoutMixin
 import app_icons
 
 
+def initial_folder_exists(path):
+    return os.path.isdir(path)
+
+
 class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMixin, FileActionsMixin, PreviewMixin, ArchiveActionsMixin, LayoutMixin, QMainWindow):
     def __init__(self, settings=None):
         super().__init__()
@@ -48,6 +52,7 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
         self.size_attempted = set()
         self.generation = 0
         self.current = None
+        self.closing = False
         self.history = []
         self.history_index = -1
         self.cut_paths = []
@@ -110,7 +115,17 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
         if self.settings.value("preview_open", False, type=bool):
             self.preview_button.setChecked(True)
         initial = self.settings.value("location", PC, type=str)
-        self.navigate(initial if initial and os.path.isdir(initial) else PC)
+        if initial:
+            self.statusBar().showMessage("Checking saved location...")
+            def startup_done(exists, error):
+                if self.current is None and not self.closing:
+                    self.navigate(initial if exists and not error else PC)
+            self.submit(lambda: initial_folder_exists(initial), startup_done)
+        else:
+            self.navigate(PC)
+        if getattr(self.settings, "last_error", None):
+            self.setWindowTitle(self.windowTitle() + " [settings not saved]")
+            self.statusBar().showMessage("Settings not saved: " + self.settings.last_error)
 
 
     def submit(self, fn, done, progress=None):
@@ -139,6 +154,7 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
             self.statusBar().showMessage("Finish or skip the current ZIP extraction before closing.")
             event.ignore()
             return
+        self.closing = True
         self.end_rename(refresh=False)
         self.stop_preview()
         self.cancel_duplicate_view()
@@ -158,5 +174,6 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
             self.settings.setValue(f"pane/{i}/mode", self.proxies[i].mode)
             self.settings.setValue(f"pane/{i}/sort_column", view.header().sortIndicatorSection())
             self.settings.setValue(f"pane/{i}/descending", view.header().sortIndicatorOrder() == Qt.DescendingOrder)
-        self.settings.sync()
+        if self.settings.sync() is False:
+            self.warn("Settings could not be saved: " + self.settings.last_error)
         super().closeEvent(event)

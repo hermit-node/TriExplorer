@@ -95,7 +95,7 @@ class LayoutMixin:
         self.quick.setIndentation(0)
         self.quick.setContextMenuPolicy(Qt.CustomContextMenu)
         self.quick.customContextMenuRequested.connect(self.quick_menu)
-        self.quick.itemClicked.connect(lambda item, _: self.navigate(item.data(0, PATH_ROLE)))
+        self.quick.itemClicked.connect(self.quick_activated)
         self.tree = QTreeWidget()
         self.tree.setHeaderHidden(True)
         self.tree.setUniformRowHeights(True)

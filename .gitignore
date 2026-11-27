@@ -232,3 +232,7 @@ __marimo__/
 /*.spec
 /*.sqlite3
 /*.sqlite3-*
+
+/.settings.ini.writeguard
+/.settings.ini-*.tmp
+/settings.ini.lock*

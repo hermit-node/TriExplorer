@@ -5,6 +5,7 @@ from pathlib import Path
 from PySide6.QtCore import QSettings
 import folder_sizes
 import runtime_paths
+from portable_ini import PortableIni
 import duplicates
 from services.filesystem import valid_name
 from services import recycle as recycle_store
@@ -37,7 +38,7 @@ DEFAULT_CONFIG = {
 
 def open_settings():
     """Load portable settings.ini; import any missing legacy registry preferences once."""
-    settings = QSettings(str(settings_file()), QSettings.IniFormat)
+    settings = PortableIni(settings_file())
     if not settings.value("meta/legacy_imported", False, type=bool):
         if not runtime_paths.is_frozen():
             legacy = QSettings("KHzz", APP)

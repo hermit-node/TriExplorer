@@ -284,27 +284,7 @@ class FileActionsMixin:
 
 
     def restore_recycled(self):
-        root = network_root(self.current) if self.current else None
-        if root is None:
-            if os.name == "nt":
-                os.startfile("shell:RecycleBinFolder")
-            return
-
-        def done(records, error):
-            if error:
-                self.warn(error)
-                return
-            if not records:
-                self.statusBar().showMessage("No recoverable items on this share.")
-                return
-            labels = [f"{date}  |  {relative}  [{key[:8]}]" for date, relative, key in records]
-            label, ok = QInputDialog.getItem(self, "Restore from network recycle",
-                                             "Select an item to restore to its original location:", labels, 0, False)
-            if ok:
-                key = records[labels.index(label)][2]
-                self.operation("Restoring", lambda: restore_share_item(root, key))
-
-        self.submit(lambda: share_trash_entries(root), done)
+        self.open_recycle_bin()
 
 
     def create_zip(self):
