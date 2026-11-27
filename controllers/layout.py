@@ -9,6 +9,9 @@ from appcore import (
     QTreeWidget, QVBoxLayout, QWidget, Qt, create_table_pane
 )
 
+from status_history import StatusHistory
+
+
 class LayoutMixin:
     def tool(self, text, callback, icon=None, tip=None):
         b = QToolButton()
@@ -86,7 +89,26 @@ class LayoutMixin:
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.setChildrenCollapsible(False)
         self.splitter.setHandleWidth(7)
-        root.addWidget(self.splitter, 1)
+        self.content_splitter = QSplitter(Qt.Vertical)
+        self.content_splitter.setChildrenCollapsible(False)
+        self.content_splitter.setHandleWidth(6)
+        root.addWidget(self.content_splitter, 1)
+        self.content_splitter.addWidget(self.splitter)
+        self.status_history = StatusHistory(self)
+        self.content_splitter.addWidget(self.status_history)
+        self.content_splitter.setStretchFactor(0, 1)
+        self.content_splitter.setStretchFactor(1, 0)
+        self.status_history.hide()
+        self.status_history_height = 180
+        self.history_button = QToolButton()
+        self.history_button.setText("Status history")
+        self.history_button.setCheckable(True)
+        self.history_button.setArrowType(Qt.RightArrow)
+        self.history_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.history_button.setToolTip("Show or hide recent status messages (Alt+H)")
+        self.statusBar().addPermanentWidget(self.history_button)
+        self.statusBar().messageChanged.connect(self.status_history.record)
+        self.history_button.toggled.connect(self.toggle_status_history)
         side, side_layout = self.panel()
         side.setMinimumWidth(180)
         self.quick = QTreeWidget()
@@ -184,6 +206,7 @@ class LayoutMixin:
         self.build_quick()
         for key, fn in (("Alt+Left", self.back), ("Alt+Right", self.forward), ("Alt+Up", self.up),
                         ("F5", self.refresh), ("Alt+P", lambda: self.preview_button.toggle()),
+                        ("Alt+H", self.history_button.toggle),
                         ("Alt+Home", self.go_home), ("Ctrl+L", self.focus_address),
                         ("Ctrl+F", self.search.setFocus), ("Ctrl+Shift+N", self.new_folder),
                         ("F2", self.rename), ("Delete", self.delete), ("Ctrl+C", self.copy),
@@ -198,6 +221,21 @@ class LayoutMixin:
             else:
                 self.addAction(action)
             action.triggered.connect(fn)
+
+
+    def toggle_status_history(self, expanded):
+        if expanded:
+            height = max(90, self.status_history_height)
+            available = max(180, self.content_splitter.height())
+            self.status_history.show()
+            height = min(height, max(90, available // 2))
+            self.content_splitter.setSizes([available - height, height])
+            self.history_button.setArrowType(Qt.DownArrow)
+        else:
+            if not self.status_history.isHidden():
+                self.status_history_height = max(90, self.status_history.height())
+            self.status_history.hide()
+            self.history_button.setArrowType(Qt.RightArrow)
 
 
     def editing(self):
