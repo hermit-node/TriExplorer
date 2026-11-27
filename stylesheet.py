@@ -23,6 +23,10 @@ QToolButton { background: transparent; border: 1px solid transparent; border-rad
 QToolButton:hover { background: #e6edf7; border-color: #d4e0ee; }
 QToolButton:pressed, QToolButton:checked { background: #d5e5fa; }
 QToolButton:disabled { color: #a0aab8; }
+QToolButton#containmentToggle { background: #f3f5f8; border-color: #dbe1e9; padding: 6px 12px; }
+QToolButton#containmentToggle:hover { background: #e6edf7; border-color: #b9cde7; }
+QToolButton#containmentToggle:checked { background: #d5e5fa; border-color: #8daed8; }
+QToolButton#containmentToggle:focus { border-color: #3478c9; }
 QLineEdit { background: white; border: 1px solid #cdd6e1; border-radius: 5px; padding: 6px 9px; selection-background-color: #3478c9; }
 QLineEdit:focus { border-color: #3478c9; }
 QTreeView, QTreeWidget { border: none; background: #ffffff; alternate-background-color: #f7f9fc; outline: 0; selection-background-color: #dceaff; selection-color: #152d50; }

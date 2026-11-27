@@ -18,7 +18,7 @@ from PySide6.QtGui import QDrag, QImageReader, QPixmap
 from PySide6.QtWidgets import (
     QTreeView, QAbstractItemView, QLineEdit, QLabel,
     QComboBox, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
-    QHeaderView, QSizePolicy, QCheckBox
+    QHeaderView, QSizePolicy, QToolButton
 )
 from filters import PANE_MODES, CATEGORY_SUFFIXES
 from file_types import PC, Entry, normalized, readable_size
@@ -386,7 +386,7 @@ class TablePane:
     proxy: PaneFilter
     count: QLabel
     selector: QComboBox
-    containment: QCheckBox
+    containment: QToolButton
     footer: QWidget
 
 
@@ -440,7 +440,12 @@ def create_table_pane(index, default_mode, settings, source_model, show_hidden, 
     bottom = QHBoxLayout(footer)
     bottom.setContentsMargins(7, 2, 7, 4)
     bottom.addStretch()
-    containment = QCheckBox("Include contained archives")
+    containment = QToolButton()
+    containment.setText("Include contained archives")
+    containment.setObjectName("containmentToggle")
+    containment.setCheckable(True)
+    containment.setMinimumHeight(34)
+    containment.setCursor(Qt.PointingHandCursor)
     containment.setToolTip("Include ZIP/ISO files fully represented by folders that contain additional files")
     bottom.addWidget(containment)
     layout.addWidget(footer)

@@ -87,8 +87,16 @@ class ContainmentTests(unittest.TestCase):
                 w.show_archive_matches(w.views[0])
                 wait_for(lambda: not w.workers)
                 self.assertFalse(w.archive_pairs)
+                from PySide6.QtWidgets import QToolButton
+                from PySide6.QtTest import QTest
+                from PySide6.QtCore import Qt, QPoint
+                button = w.containment_buttons[0]
+                self.assertIsInstance(button, QToolButton)
+                self.assertTrue(button.isCheckable())
+                self.assertGreaterEqual(button.height(), 34)
                 self.assertFalse(w.containment_buttons[0].isChecked())
-                w.containment_buttons[0].click()
+                QTest.mouseClick(button, Qt.LeftButton, pos=QPoint(button.width()-5, button.height()//2))
+                self.assertTrue(button.isChecked())
                 wait_for(lambda: not w.workers)
                 self.assertEqual(len(w.archive_pairs),1)
                 self.assertTrue(w.archive_pairs[0].contained and w.archive_pairs[0].verified)
