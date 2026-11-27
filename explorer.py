@@ -85,9 +85,14 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
         })
         self.model = Files(self.icons, self)
         self.watcher = QFileSystemWatcher(self)
-        self.refresh_timer = QTimer(self, singleShot=True, interval=250)
+        self.folder_load_token = None
+        try:
+            refresh_ms = int(self.settings.value("watcher/refresh_ms", 1500))
+        except (TypeError, ValueError):
+            refresh_ms = 1500
+        self.refresh_timer = QTimer(self, singleShot=True, interval=max(500, min(30000, refresh_ms)))
         self.refresh_timer.timeout.connect(self.refresh_from_watcher)
-        self.watcher.directoryChanged.connect(lambda _: self.refresh_timer.start())
+        self.watcher.directoryChanged.connect(self.queue_watcher_refresh)
         self.build()
         geometry = self.settings.value("geometry")
         if geometry:

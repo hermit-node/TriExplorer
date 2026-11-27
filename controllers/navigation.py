@@ -74,7 +74,17 @@ class NavigationMixin:
                 self.load_tree(item)
 
 
+    def queue_watcher_refresh(self, path):
+        # Coalesce event bursts without perpetually postponing refresh on busy shares.
+        if normalized(path) == normalized(self.current) and self.current:
+            if not self.refresh_timer.isActive():
+                self.refresh_timer.start()
+
     def refresh_from_watcher(self):
+        # Keep at most one automatic directory reload in flight; never interrupt renaming.
+        if self.folder_load_token is not None or self.rename_editor is not None or self.rename_busy:
+            self.refresh_timer.start()
+            return
         self.load_folder()
         self.refresh_tree_branch()
 
@@ -92,6 +102,7 @@ class NavigationMixin:
         if path is None:
             return
         if clear:
+            self.refresh_timer.stop()
             self.cancel_duplicate_view()
             self.cancel_archive_matches()
             self.model.archive_notes = {}
@@ -100,15 +111,19 @@ class NavigationMixin:
             self.size_attempted.clear()
         self.generation += 1
         token = self.generation
+        self.folder_load_token = token
         selected = [[e.path for e in self.selected(v)] for v in self.views] if not clear else [[], []]
         if clear:
             self.model.replace([])
             self.update_counts()
         self.statusBar().showMessage("Loading " + (path or "This PC") + "...")
-        if self.watcher.directories():
-            self.watcher.removePaths(self.watcher.directories())
+        obsolete = [p for p in self.watcher.directories() if normalized(p) != normalized(path)]
+        if obsolete:
+            self.watcher.removePaths(obsolete)
 
         def done(result, error):
+            if self.folder_load_token == token:
+                self.folder_load_token = None
             if token != self.generation:
                 return
             if error:
@@ -127,7 +142,7 @@ class NavigationMixin:
                         if i.data(PATH_ROLE) in wanted:
                             view.selectionModel().select(i, view.selectionModel().SelectionFlag.Select |
                                                          view.selectionModel().SelectionFlag.Rows)
-            if path:
+            if path and not any(normalized(p) == normalized(path) for p in self.watcher.directories()):
                 self.watcher.addPath(path)
             self.update_counts()
             self.schedule_preview()

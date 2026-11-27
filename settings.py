@@ -20,6 +20,7 @@ SETTINGS_PATH = settings_file()
 DEFAULT_CONFIG = {
     "app/name": "TriExplorer",
     "cache/sqlite_path": "auto",
+    "watcher/refresh_ms": 1500,
     "network/trash_name": ".TriExplorer-Recycle",
     "hidden": False,
     "preview_open": False,
