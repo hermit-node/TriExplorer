@@ -86,6 +86,7 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
         self.model = Files(self.icons, self)
         self.watcher = QFileSystemWatcher(self)
         self.folder_load_token = None
+        self.watcher_enabled = self.settings.value("watcher/enabled", True, type=bool)
         try:
             refresh_ms = int(self.settings.value("watcher/refresh_ms", 1500))
         except (TypeError, ValueError):

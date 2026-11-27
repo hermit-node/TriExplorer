@@ -76,7 +76,7 @@ class NavigationMixin:
 
     def queue_watcher_refresh(self, path):
         # Coalesce event bursts without perpetually postponing refresh on busy shares.
-        if normalized(path) == normalized(self.current) and self.current:
+        if self.watcher_enabled and normalized(path) == normalized(self.current) and self.current:
             if not self.refresh_timer.isActive():
                 self.refresh_timer.start()
 
@@ -85,8 +85,8 @@ class NavigationMixin:
         if self.folder_load_token is not None or self.rename_editor is not None or self.rename_busy:
             self.refresh_timer.start()
             return
-        self.load_folder()
-        self.refresh_tree_branch()
+        if self.watcher_enabled:
+            self.load_folder(from_watcher=True)
 
 
     def refresh(self):
@@ -95,7 +95,7 @@ class NavigationMixin:
         self.load_folder()
 
 
-    def load_folder(self, clear=False):
+    def load_folder(self, clear=False, from_watcher=False):
         if self.rename_editor is not None or self.rename_busy:
             return
         path = self.current
@@ -116,7 +116,8 @@ class NavigationMixin:
         if clear:
             self.model.replace([])
             self.update_counts()
-        self.statusBar().showMessage("Loading " + (path or "This PC") + "...")
+        if not from_watcher:
+            self.statusBar().showMessage("Loading " + (path or "This PC") + "...")
         obsolete = [p for p in self.watcher.directories() if normalized(p) != normalized(path)]
         if obsolete:
             self.watcher.removePaths(obsolete)
@@ -127,11 +128,18 @@ class NavigationMixin:
             if token != self.generation:
                 return
             if error:
+                if from_watcher:
+                    self.statusBar().showMessage("Automatic refresh failed: " + error)
+                    return
                 self.model.replace([])
                 self.update_counts()
                 self.statusBar().showMessage("Cannot read folder: " + error)
                 return
             entries, sizes = result
+            if from_watcher and set(entries) == set(self.model.entries):
+                # SMB can emit notifications without a visible listing change.
+                # Do not reset/sort both models or initiate further scans.
+                return
             self.model.replace(entries, sizes)
             for view, paths in zip(self.views, selected):
                 if paths:
@@ -142,10 +150,12 @@ class NavigationMixin:
                         if i.data(PATH_ROLE) in wanted:
                             view.selectionModel().select(i, view.selectionModel().SelectionFlag.Select |
                                                          view.selectionModel().SelectionFlag.Rows)
-            if path and not any(normalized(p) == normalized(path) for p in self.watcher.directories()):
+            if self.watcher_enabled and path and not any(normalized(p) == normalized(path) for p in self.watcher.directories()):
                 self.watcher.addPath(path)
             self.update_counts()
             self.schedule_preview()
+            if from_watcher:
+                self.refresh_tree_branch()
             self.statusBar().showMessage(path or "This PC")
             if any(p.mode == "duplicates" for p in self.proxies):
                 self.scan_duplicate_view(force=False)
@@ -154,8 +164,12 @@ class NavigationMixin:
             if self.size_job is None:
                 self.refresh_folder_sizes()
 
+        previous_entries = frozenset(self.model.entries) if from_watcher else None
+
         def list_with_sizes():
             entries = scan(path)
+            if previous_entries is not None and frozenset(entries) == previous_entries:
+                return entries, {}
             try:
                 sizes = folder_sizes.lookup(self.size_db,
                                             [(e.path, e.modified) for e in entries if e.folder]) if path else {}
