@@ -11,7 +11,7 @@ PANE_MODES = (
     ("audio", "Audio"),
     ("code", "Code & scripts"),
     ("duplicates", "Duplicates only (SHA-256)"),
-    ("archive_matches", "ZIP / folder matches"),
+    ("archive_matches", "ZIP / ISO / folder matches"),
 )
 CATEGORY_SUFFIXES = {
     "images": frozenset(

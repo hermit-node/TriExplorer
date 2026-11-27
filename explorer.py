@@ -43,6 +43,7 @@ class Explorer(DuplicateActionsMixin, SidebarMixin, NavigationMixin, SelectionMi
         self.duplicate_scan_errors = []
         self.duplicate_cleanup = False
         self.archive_match_job = None
+        self.archive_contained = False
         self.archive_match_progress = ""
         self.archive_match_errors = []
         self.archive_pairs = []

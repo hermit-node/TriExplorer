@@ -75,6 +75,12 @@ class LayoutMixin:
                          ("Recycle", self.delete), ("Restore", self.restore_recycled), ("Create ZIP", self.create_zip),
                          ("Pin folder", self.pin)):
             actions.addWidget(self.tool(text, fn))
+        self.containment_button = self.tool("Include contained archives", lambda: None)
+        self.containment_button.setCheckable(True)
+        self.containment_button.setToolTip("Also match archives fully represented by a folder containing additional files")
+        self.containment_button.toggled.connect(self.set_archive_containment)
+        actions.addWidget(self.containment_button)
+        self.containment_button.hide()
         actions.addStretch()
         hidden = self.tool("Hidden items", self.toggle_hidden)
         hidden.setCheckable(True)
@@ -203,6 +209,7 @@ class LayoutMixin:
         self.splitter.setStretchFactor(0, 0)
         self.splitter.setStretchFactor(1, 3)
         self.splitter.setStretchFactor(2, 2)
+        self.containment_button.setVisible(any(p.mode == "archive_matches" for p in self.proxies))
         self.build_quick()
         for key, fn in (("Alt+Left", self.back), ("Alt+Right", self.forward), ("Alt+Up", self.up),
                         ("F5", self.refresh), ("Alt+P", lambda: self.preview_button.toggle()),
@@ -253,6 +260,7 @@ class LayoutMixin:
         mode = self.mode_selectors[i].currentData()
         proxy = self.proxies[i]
         proxy.set_mode(mode)
+        self.containment_button.setVisible(any(p.mode == "archive_matches" for p in self.proxies))
         if mode in ("alphabetical", "archive_matches"):
             self.views[i].sortByColumn(0, Qt.AscendingOrder)
         self.update_counts()

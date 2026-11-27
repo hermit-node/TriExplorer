@@ -265,7 +265,7 @@ class NavigationMixin:
     def update_counts(self):
         for proxy, label in zip(self.proxies, self.counts):
             if proxy.mode == "archive_matches":
-                label.setText(self.archive_match_progress or "ZIP / folder matches")
+                label.setText(self.archive_match_progress or "ZIP / ISO / folder matches")
                 label.setToolTip(
                     "\n".join(self.archive_match_errors[:30]) or "Hover matched rows for verification details")
             elif proxy.mode == "duplicates" and self.duplicate_job is not None:

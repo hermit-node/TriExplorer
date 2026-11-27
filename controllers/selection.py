@@ -102,19 +102,19 @@ class SelectionMixin:
             dup = menu.addMenu("Duplicates (SHA-256)")
             dup.setEnabled(not self.duplicate_cleanup)
             dup.addAction("Find duplicates", lambda: self.show_duplicates(view))
-            dup.addAction("Find ZIP / folder matches", lambda: self.show_archive_matches(view))
+            dup.addAction("Find ZIP / ISO / folder matches", lambda: self.show_archive_matches(view))
             dup.addAction("Verify ZIP / folder matches with password...", lambda: self.show_archive_matches(view, True))
             if self.archive_match_errors:
-                dup.addAction("Show ZIP/folder scan errors",
+                dup.addAction("Show archive/folder scan errors",
                               lambda: self.warn("\n".join(self.archive_match_errors[:100])))
             if self.duplicate_scan_errors:
                 dup.addAction("Show skipped files / scan errors",
                               lambda: self.warn("\n".join(self.duplicate_scan_errors[:100])))
             if view.model().mode == "archive_matches":
-                cleanup = dup.addAction("Recycle matching ZIPs - keep folders", lambda: self.cleanup_archive_pairs())
+                cleanup = dup.addAction("Recycle matching archives - keep folders", lambda: self.cleanup_archive_pairs())
                 cleanup.setEnabled(self.archive_match_job is None and bool(self.archive_pairs))
                 if entry:
-                    action = menu.addAction("Recycle matching ZIP(s) - keep folder",
+                    action = menu.addAction("Recycle matching archive(s) - keep folder",
                                             lambda: self.cleanup_archive_pairs(entry.path))
                     action.setEnabled(self.archive_match_job is None and not self.duplicate_cleanup)
                 exact = dup.addAction("Recycle identical files - keep one", lambda: self.cleanup_duplicates())

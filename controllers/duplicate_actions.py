@@ -97,6 +97,12 @@ class DuplicateActionsMixin:
             self.archive_match_job = None
 
 
+    def set_archive_containment(self, enabled):
+        self.archive_contained = enabled
+        if any(p.mode == "archive_matches" for p in self.proxies):
+            self.scan_archive_matches()
+
+
     def show_archive_matches(self, view, with_password=False):
         selector = self.mode_selectors[self.views.index(view)]
         if with_password:
@@ -107,6 +113,7 @@ class DuplicateActionsMixin:
             selector.setCurrentIndex(selector.findData("archive_matches"))
             selector.blockSignals(False)
             self.proxies[self.views.index(view)].set_mode("archive_matches")
+            self.containment_button.show()
             view.sortByColumn(0, Qt.AscendingOrder)
             self.settings.setValue(f"pane/{self.views.index(view)}/mode", "archive_matches")
             self.scan_archive_matches(password_override=password.encode("utf-8"))
@@ -119,7 +126,7 @@ class DuplicateActionsMixin:
     def scan_archive_matches(self, force=True, password_override=None):
         if self.duplicate_cleanup or not self.current or not any(p.mode == "archive_matches" for p in self.proxies):
             return
-        scan_key = (normalized(self.current), self.show_hidden, tuple(sorted(
+        scan_key = (normalized(self.current), self.show_hidden, self.archive_contained, tuple(sorted(
             (normalized(e.path), e.size if e.size is not None else -1,
              e.modified if e.modified is not None else -1)
             for e in self.model.entries)))
@@ -137,12 +144,13 @@ class DuplicateActionsMixin:
         entries = [e for e in self.model.entries if self.show_hidden or not e.hidden]
         folders = [e.path for e in entries if e.folder]
         archives = [(e.path, e.size) for e in entries if
-                    not e.folder and e.name.lower().endswith(".zip") and e.size is not None]
+                    not e.folder and e.name.lower().endswith((".zip", ".iso")) and e.size is not None]
         sizes = dict(self.model.folder_sizes)
+        allow_contained = self.archive_contained
         password = self.zip_password if password_override is None else password_override
         stop = Event()
         self.archive_match_job = stop
-        self.archive_match_progress = "Checking sizes..."
+        self.archive_match_progress = "Screening file sizes (70%)..."
         self.archive_match_errors = []
         self.update_counts()
 
@@ -162,7 +170,7 @@ class DuplicateActionsMixin:
             if match:
                 self.archive_pairs.append(match)
                 add(match)
-            self.archive_match_progress = f"ZIP: {n}/{total}"
+            self.archive_match_progress = f"Archive: {n}/{total}" if total else "Screening file sizes..."
             self.update_counts()
 
         def done(result, error):
@@ -188,7 +196,8 @@ class DuplicateActionsMixin:
         def run(emit):
             matches, errors = archive_matches.find_matches(folders, archives, sizes, self.size_db,
                                                            zip_members, password, stop.is_set,
-                                                           lambda n, total, m: emit(n, total, m))
+                                                           lambda n, total, m: emit(n, total, m),
+                                                           allow_contained=allow_contained)
             try:
                 updated = folder_sizes.lookup(self.size_db, folder_rows)
             except (OSError, sqlite3.Error):
@@ -204,7 +213,7 @@ class DuplicateActionsMixin:
         if self.archive_match_job is not None:
             self.statusBar().showMessage("Wait for the ZIP / folder scan to finish before cleanup.")
             return
-        pairs = list(self.archive_pairs)
+        pairs = [m for m in self.archive_pairs if m.recyclable and (self.archive_contained or not m.contained)]
         if preferred:
             pairs = [m for m in pairs if normalized(preferred) in (normalized(m.archive), normalized(m.folder))]
         if not pairs:
@@ -226,7 +235,7 @@ class DuplicateActionsMixin:
             self.duplicate_cleanup = False
             self.refresh()
             self.refresh_tree_branch()
-            message = f"Recycled {removed} matching ZIP(s); extracted folders kept."
+            message = f"Recycled {removed} matching archive(s); extracted folders kept."
             self.statusBar().showMessage(message)
             if issues:
                 self.warn(message + "\n\n" + "\n".join(issues))
@@ -248,17 +257,18 @@ class DuplicateActionsMixin:
                 for match in group:
                     try:
                         before = duplicates.record(match.archive).signature
-                        checked = archive_matches.compare(match.archive, match.folder, zip_members, password)
-                        if checked and checked.verified:
+                        checked = archive_matches.compare(match.archive, match.folder, zip_members, password,
+                                                          allow_contained=match.contained)
+                        if checked and checked.verified and checked.recyclable:
                             if duplicates.record(match.archive).signature != before:
-                                raise ValueError("ZIP changed after verification")
+                                raise ValueError("Archive changed after verification")
                             failures = recycle([match.archive])
                             return (not failures, checked.encrypted, None, failures)
                         if checked and checked.password_required:
                             pending = checked
                         elif checked:
                             errors.append(name + ": " + checked.status)
-                    except (OSError, ValueError, RuntimeError, zipfile.BadZipFile, NotImplementedError) as exc:
+                    except Exception as exc:
                         errors.append(name + ": " + str(exc))
                 return (False, False, pending, errors)
 
@@ -279,7 +289,7 @@ class DuplicateActionsMixin:
                         if encrypted:
                             self.zip_password = password
                     else:
-                        issues.extend(errors or [name + ": no longer an exact content match; retained"])
+                        issues.extend(errors or [name + ": no longer fully verified; retained"])
                 next_group()
 
             self.submit(run, done)

@@ -108,3 +108,7 @@ Settings remain beside the application. Qt serializes a local staging copy, then
 ## Status history
 
 Click Status history in the bottom status bar or press Alt+H to expand a resizable terminal-style history of the latest 500 nonempty status messages. Messages are timestamped and collected even when collapsed. Copy all and Clear operate on the session history only; nothing is written to disk.
+
+## Archive containment (ZIP and ISO)
+
+Select ZIP / ISO / folder matches, then enable Include contained archives to allow extra files in the destination folder. The 70% size-multiset screen counts archive members, not compressed bytes; candidates must then match every member path and size, followed by full SHA-256 verification. Recycle matching archives re-verifies fresh content and never removes the folder. Encrypted ZIPs require a valid password. ISO filesystem contents are streamed via pycdlib without mounting. Bootable/hybrid ISOs, nonempty system areas, and images with unverifiable alternate filesystem trees are retained even if their visible file contents match. ISO filesystem equivalence is not bit-for-bit disk-image equivalence.

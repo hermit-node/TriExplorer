@@ -1,2 +1,3 @@
 PySide6>=6.8,<7
 pyzipper>=0.3.6
+pycdlib>=1.14,<2
