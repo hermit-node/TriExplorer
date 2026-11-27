@@ -5,7 +5,7 @@ These mixins do not construct UI independently; Explorer composes the controller
 from __future__ import annotations
 from appcore import (
     Event, LOADED_ROLE, PATH_ROLE, PC, QApplication, QSortFilterProxyModel,
-    QTreeWidgetItem, folder_sizes, normalized, os, scan, sqlite3
+    QTreeWidgetItem, folder_sizes, normalized, os, scan, sqlite3, network_root
 )
 
 class NavigationMixin:
@@ -76,7 +76,7 @@ class NavigationMixin:
 
     def queue_watcher_refresh(self, path):
         # Coalesce event bursts without perpetually postponing refresh on busy shares.
-        if self.watcher_enabled and normalized(path) == normalized(self.current) and self.current:
+        if self.watcher_enabled and (not self.current_is_network or self.network_watcher_enabled) and normalized(path) == normalized(self.current) and self.current:
             if not self.refresh_timer.isActive():
                 self.refresh_timer.start()
 
@@ -85,7 +85,7 @@ class NavigationMixin:
         if self.folder_load_token is not None or self.rename_editor is not None or self.rename_busy:
             self.refresh_timer.start()
             return
-        if self.watcher_enabled:
+        if self.watcher_enabled and (not self.current_is_network or self.network_watcher_enabled):
             self.load_folder(from_watcher=True)
 
 
@@ -112,7 +112,6 @@ class NavigationMixin:
         self.generation += 1
         token = self.generation
         self.folder_load_token = token
-        selected = [[e.path for e in self.selected(v)] for v in self.views] if not clear else [[], []]
         if clear:
             self.model.replace([])
             self.update_counts()
@@ -135,26 +134,23 @@ class NavigationMixin:
                 self.update_counts()
                 self.statusBar().showMessage("Cannot read folder: " + error)
                 return
-            entries, sizes = result
+            entries, sizes, remote = result
+            self.current_is_network = remote
             if from_watcher and set(entries) == set(self.model.entries):
                 # SMB can emit notifications without a visible listing change.
                 # Do not reset/sort both models or initiate further scans.
                 return
-            self.model.replace(entries, sizes)
-            for view, paths in zip(self.views, selected):
-                if paths:
-                    wanted = set(paths)
-                    proxy = view.model()
-                    for row in range(proxy.rowCount()):
-                        i = proxy.index(row, 0)
-                        if i.data(PATH_ROLE) in wanted:
-                            view.selectionModel().select(i, view.selectionModel().SelectionFlag.Select |
-                                                         view.selectionModel().SelectionFlag.Rows)
-            if self.watcher_enabled and path and not any(normalized(p) == normalized(path) for p in self.watcher.directories()):
+            old_folders = {normalized(e.path) for e in self.model.entries if e.folder}
+            new_folders = {normalized(e.path) for e in entries if e.folder}
+            if clear:
+                self.model.replace(entries, sizes)
+            else:
+                self.model.reconcile(entries, sizes)
+            if self.watcher_enabled and (not remote or self.network_watcher_enabled) and path and not any(normalized(p) == normalized(path) for p in self.watcher.directories()):
                 self.watcher.addPath(path)
             self.update_counts()
             self.schedule_preview()
-            if from_watcher:
+            if from_watcher and old_folders != new_folders:
                 self.refresh_tree_branch()
             self.statusBar().showMessage(path or "This PC")
             if any(p.mode == "duplicates" for p in self.proxies):
@@ -167,15 +163,16 @@ class NavigationMixin:
         previous_entries = frozenset(self.model.entries) if from_watcher else None
 
         def list_with_sizes():
+            remote = bool(path and network_root(path))
             entries = scan(path)
             if previous_entries is not None and frozenset(entries) == previous_entries:
-                return entries, {}
+                return entries, {}, remote
             try:
                 sizes = folder_sizes.lookup(self.size_db,
                                             [(e.path, e.modified) for e in entries if e.folder]) if path else {}
             except (OSError, ValueError, sqlite3.Error):
                 sizes = {}
-            return entries, sizes
+            return entries, sizes, remote
 
         self.submit(list_with_sizes, done)
 

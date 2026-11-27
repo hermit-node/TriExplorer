@@ -22,6 +22,7 @@ DEFAULT_CONFIG = {
     "cache/sqlite_path": "auto",
     "watcher/enabled": True,
     "watcher/refresh_ms": 1500,
+    "watcher/network_enabled": False,
     "network/trash_name": ".TriExplorer-Recycle",
     "hidden": False,
     "preview_open": False,

@@ -7,6 +7,8 @@ class WatcherTests(unittest.TestCase):
     def setUp(self):
         self.w=NavigationMixin()
         self.w.watcher_enabled=True
+        self.w.current_is_network=False
+        self.w.network_watcher_enabled=False
         self.w.current='C:/folder'
         self.w.refresh_timer=Mock()
         self.w.refresh_timer.isActive.return_value=False
@@ -39,6 +41,17 @@ class WatcherTests(unittest.TestCase):
         w.refresh_from_watcher()
         w.load_folder.assert_called_once_with(from_watcher=True)
         w.refresh_tree_branch.assert_not_called()
+
+    def test_network_watcher_is_opt_in(self):
+        w=self.w
+        w.current_is_network=True
+        w.queue_watcher_refresh(w.current)
+        w.refresh_timer.start.assert_not_called()
+        w.refresh_from_watcher()
+        w.load_folder.assert_not_called()
+        w.network_watcher_enabled=True
+        w.queue_watcher_refresh(w.current)
+        w.refresh_timer.start.assert_called_once()
 
     def test_disabled_watcher(self):
         w=self.w

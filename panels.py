@@ -49,6 +49,49 @@ class Files(QAbstractTableModel):
         self.folder_sizes = sizes or {}
         self.endResetModel()
 
+    def reconcile(self, entries, sizes):
+        """Apply a same-directory snapshot without resetting persistent indexes."""
+        incoming = {normalized(e.path): e for e in entries}
+        removed = [i for i, e in enumerate(self.entries) if normalized(e.path) not in incoming]
+        # Remove contiguous runs backwards, retaining Qt indexes of unaffected rows.
+        while removed:
+            end = start = removed.pop()
+            while removed and removed[-1] == start - 1:
+                start = removed.pop()
+            self.beginRemoveRows(QModelIndex(), start, end)
+            del self.entries[start:end + 1]
+            self.endRemoveRows()
+        old_sizes = self.folder_sizes
+        new_sizes = {k: v for k, v in old_sizes.items() if k in incoming and incoming[k].folder}
+        # Preserve fresher results delivered by an ongoing size worker.
+        for k, v in sizes.items():
+            if k not in new_sizes or v.checked >= new_sizes[k].checked:
+                new_sizes[k] = v
+        for k, v in list(new_sizes.items()):
+            e = incoming[k]
+            if e.modified is not None and abs(e.modified - v.modified) > 0.00001 and not v.stale:
+                from dataclasses import replace
+                new_sizes[k] = replace(v, stale=True)
+        self.folder_sizes = new_sizes
+        changed = []
+        for i, old in enumerate(self.entries):
+            k = normalized(old.path)
+            new = incoming.pop(k)
+            if old != new or old_sizes.get(k) != new_sizes.get(k):
+                self.entries[i] = new
+                changed.append(i)
+        # Coalesce dataChanged ranges instead of sorting for every metadata update.
+        while changed:
+            start = end = changed.pop()
+            while changed and changed[-1] == start - 1:
+                start = changed.pop()
+            self.dataChanged.emit(self.index(start, 0), self.index(end, 3), [])
+        if incoming:
+            start = len(self.entries)
+            self.beginInsertRows(QModelIndex(), start, start + len(incoming) - 1)
+            self.entries.extend(incoming.values())
+            self.endInsertRows()
+
     def set_folder_size(self, path, size):
         self.folder_sizes[path] = size
         for row, entry in enumerate(self.entries):
