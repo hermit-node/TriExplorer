@@ -17,6 +17,19 @@ class FolderSize:
     checked: float
     modified: float
     stale: bool = False
+    files: int | None = None
+    directories: int | None = None
+    other: int | None = None
+
+    @property
+    def items(self):
+        if None in (self.files, self.directories, self.other):
+            return None
+        return self.files + self.directories + self.other
+
+    @property
+    def empty(self):
+        return not self.stale and self.items == 0
 
 def cache_path():
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
@@ -30,6 +43,16 @@ def connect(db):
     db.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db, timeout=10)
     con.execute("CREATE TABLE IF NOT EXISTS folder_sizes (path TEXT PRIMARY KEY, bytes INTEGER NOT NULL, checked REAL NOT NULL, modified REAL NOT NULL)")
+    # Upgrade existing caches in place; legacy counts stay unknown.
+    columns = {row[1] for row in con.execute("PRAGMA table_info(folder_sizes)")}
+    for name in ("files", "directories", "other"):
+        if name not in columns:
+            try:
+                con.execute(f"ALTER TABLE folder_sizes ADD COLUMN {name} INTEGER")
+            except sqlite3.OperationalError:
+                if name not in {row[1] for row in con.execute("PRAGMA table_info(folder_sizes)")}:
+                    con.close()
+                    raise
     return con
 
 def lookup(db, folders):
@@ -40,11 +63,12 @@ def lookup(db, folders):
     with closing(connect(db)) as con, con:
         for path, modified in folders:
             k = key(path)
-            row = con.execute("SELECT bytes, checked, modified FROM folder_sizes WHERE path=?", (k,)).fetchone()
+            row = con.execute("SELECT bytes, checked, modified, files, directories, other FROM folder_sizes WHERE path=?", (k,)).fetchone()
             if row:
-                size, checked, old_modified = row
+                size, checked, old_modified, files, directories, other = row
                 result[k] = FolderSize(size, checked, old_modified,
-                    now - checked > MAX_AGE or modified is None or abs(modified - old_modified) > 0.00001)
+                    now - checked > MAX_AGE or modified is None or abs(modified - old_modified) > 0.00001,
+                    files, directories, other)
     return result
 
 def is_link(s):
@@ -64,32 +88,42 @@ def scan_tree(path, cancelled=lambda: False):
             raise InterruptedError("Folder size scan cancelled")
         folder, complete, info = stack.pop()
         if complete:
-            own, children, modified = info
+            own, children, modified, counts = info
             size = own + sum(totals[child] for child in children)
             if os.stat(folder, follow_symlinks=False).st_mtime != modified:
                 raise OSError("Directory changed during size calculation")
             totals[folder] = size
-            records[key(folder)] = (size, checked, modified)
+            records[key(folder)] = (size, checked, modified, *counts)
             continue
         s = os.stat(folder, follow_symlinks=False)
         if is_link(s) or not stat.S_ISDIR(s.st_mode):
             raise ValueError("Not an ordinary directory")
         own, children = 0, []
+        files = directories = other = 0
         with os.scandir(folder) as entries:
             for item in entries:
                 if cancelled():
                     raise InterruptedError("Folder size scan cancelled")
                 name = item.name.casefold()
-                if name in EXCLUDED or name.startswith(".triextract-"):
-                    continue
+                # Count every immediate entry, including hidden and excluded
+                # entries. Excluded trees and links still do not contribute bytes.
                 child = item.stat(follow_symlinks=False)
                 if is_link(child):
+                    other += 1
+                    continue
+                if stat.S_ISDIR(child.st_mode):
+                    directories += 1
+                elif stat.S_ISREG(child.st_mode):
+                    files += 1
+                else:
+                    other += 1
+                if name in EXCLUDED or name.startswith(".triextract-"):
                     continue
                 if stat.S_ISDIR(child.st_mode):
                     children.append(item.path)
                 elif stat.S_ISREG(child.st_mode):
                     own += child.st_size
-        stack.append((folder, True, (own, children, s.st_mtime)))
+        stack.append((folder, True, (own, children, s.st_mtime, (files, directories, other))))
         stack.extend((child, False, None) for child in reversed(children))
     return records
 
@@ -103,9 +137,10 @@ def refresh(db, paths, cancelled=lambda: False, progress=lambda path, value, err
             if cancelled():
                 break
             with closing(connect(db)) as con, con:
-                con.executemany("INSERT INTO folder_sizes VALUES (?,?,?,?) ON CONFLICT(path) DO UPDATE SET bytes=excluded.bytes, checked=excluded.checked, modified=excluded.modified",
+                con.executemany("INSERT INTO folder_sizes (path, bytes, checked, modified, files, directories, other) VALUES (?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET bytes=excluded.bytes, checked=excluded.checked, modified=excluded.modified, files=excluded.files, directories=excluded.directories, other=excluded.other",
                                 [(k, *value) for k, value in records.items()])
-            value = FolderSize(*records[key(path)])
+            size, checked, modified, files, directories, other = records[key(path)]
+            value = FolderSize(size, checked, modified, False, files, directories, other)
             progress(key(path), value, None)
         except InterruptedError:
             break

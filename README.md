@@ -112,3 +112,7 @@ Click Status history in the bottom status bar or press Alt+H to expand a resizab
 ## Archive containment (ZIP and ISO)
 
 Select ZIP / ISO / folder matches, then enable Include contained archives at the bottom-right of that pane to allow extra files in the destination folder. Each pane has an independent toggle; cleanup uses the options of the invoking pane. The 70% size-multiset screen counts archive members, not compressed bytes; candidates must then match every member path and size, followed by full SHA-256 verification. Recycle matching archives re-verifies fresh content and never removes the folder. Encrypted ZIPs require a valid password. ISO filesystem contents are streamed via pycdlib without mounting. Bootable/hybrid ISOs, nonempty system areas, and images with unverifiable alternate filesystem trees are retained even if their visible file contents match. ISO filesystem equivalence is not bit-for-bit disk-image equivalence.
+
+## Folder contents and external navigation
+
+Folders only and Empty folders display a sortable Contents column (F = immediate files, D = immediate directories; other = links or special entries). Counts include hidden items and excluded directories; Size remains the recursive logical file total with the existing exclusions. Counts share the folder-size cache, upgraded in place. Unknown and stale counts are excluded from Empty folders; use Recalculate folder sizes to refresh cached results. Alt+double-click opens the actual folder in Windows Explorer without navigating TriExplorer.

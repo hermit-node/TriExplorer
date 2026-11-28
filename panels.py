@@ -34,7 +34,7 @@ LOADED_ROLE = int(PATH_ROLE) + 2
 
 
 class Files(QAbstractTableModel):
-    headers = ("Name", "Size", "Type", "Modified")
+    headers = ("Name", "Size", "Type", "Modified", "Contents")
 
     def __init__(self, icons, parent=None):
         super().__init__(parent)
@@ -85,7 +85,7 @@ class Files(QAbstractTableModel):
             start = end = changed.pop()
             while changed and changed[-1] == start - 1:
                 start = changed.pop()
-            self.dataChanged.emit(self.index(start, 0), self.index(end, 3), [])
+            self.dataChanged.emit(self.index(start, 0), self.index(end, self.columnCount()-1), [])
         if incoming:
             start = len(self.entries)
             self.beginInsertRows(QModelIndex(), start, start + len(incoming) - 1)
@@ -97,14 +97,14 @@ class Files(QAbstractTableModel):
         for row, entry in enumerate(self.entries):
             if entry.folder and normalized(entry.path) == path:
                 index = self.index(row, 1)
-                self.dataChanged.emit(index, index, [Qt.DisplayRole, Qt.ToolTipRole, SORT_ROLE])
+                self.dataChanged.emit(index, self.index(row, 4), [Qt.DisplayRole, Qt.ToolTipRole, SORT_ROLE])
                 break
 
     def rowCount(self, parent=QModelIndex()):
         return 0 if parent.isValid() else len(self.entries)
 
     def columnCount(self, parent=QModelIndex()):
-        return 0 if parent.isValid() else 4
+        return 0 if parent.isValid() else len(self.headers)
 
     def headerData(self, section, orientation, role=Qt.DisplayRole):
         if orientation == Qt.Horizontal and role == Qt.DisplayRole:
@@ -120,16 +120,29 @@ class Files(QAbstractTableModel):
         col = index.column()
         cached = self.folder_sizes.get(normalized(e.path)) if e.folder else None
         size = cached.size if cached is not None else e.size
+        items = cached.items if cached else None
+        contents = ""
+        if e.folder:
+            contents = "—" if items is None else (
+                ("~" if cached.stale else "") + f"{cached.files:,} F / {cached.directories:,} D"
+                + (f" / {cached.other:,} other" if cached.other else ""))
         kind = "Folder" if e.folder else ("Archive" if e.archive else (
                 Path(e.name).suffix[1:].upper() or "File"))
         if role == PATH_ROLE:
             return e.path
         if role == SORT_ROLE:
             return (e.name.casefold(), size if size is not None else -1,
-                    kind.casefold(), e.modified if e.modified is not None else -1)[col]
+                    kind.casefold(), e.modified if e.modified is not None else -1,
+                    items if items is not None else -1)[col]
         if role == Qt.DecorationRole and col == 0:
             return self.icons["folder" if e.folder else "archive" if e.archive else "file"]
         if role == Qt.ToolTipRole:
+            if col == 4 and e.folder:
+                if items is None:
+                    return "Immediate child count not calculated"
+                return (f"{cached.files:,} files, {cached.directories:,} directories, "
+                        f"{cached.other:,} other entries (immediate children, including hidden items)"
+                        + ("\nCached value may be stale" if cached.stale else ""))
             if e.folder and col == 1:
                 if cached is None:
                     return "Folder size not calculated"
@@ -138,11 +151,11 @@ class Files(QAbstractTableModel):
                     "\nCached value may be stale" if cached.stale else "")
             note = self.archive_notes.get(normalized(e.path))
             return e.path + ("\n" + note if note else "")
-        if role == Qt.TextAlignmentRole and col == 1:
+        if role == Qt.TextAlignmentRole and col in (1, 4):
             return int(Qt.AlignRight | Qt.AlignVCenter)
         if role == Qt.DisplayRole:
             date = datetime.fromtimestamp(e.modified).strftime("%Y-%m-%d  %H:%M") if e.modified is not None else ""
-            return (e.name, ("~" if cached and cached.stale else "") + readable_size(size), kind, date)[col]
+            return (e.name, ("~" if cached and cached.stale else "") + readable_size(size), kind, date, contents)[col]
 
     def flags(self, index):
         return super().flags(index) | (Qt.ItemIsDragEnabled if index.isValid() else Qt.NoItemFlags)
@@ -197,6 +210,9 @@ class PaneFilter(QSortFilterProxyModel):
             return not e.archive
         if mode == "folders":
             return e.folder
+        if mode == "empty_folders":
+            cached = self.sourceModel().folder_sizes.get(normalized(e.path))
+            return bool(e.folder and cached is not None and cached.empty)
         if mode == "files":
             return not e.folder
         if mode == "archives":
@@ -296,6 +312,7 @@ class PreviewLabel(QLabel):
 class FileView(QTreeView):
     dropped = Signal(list, str, bool)
     archive_dropped = Signal(list, str)
+    external_folder = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -313,6 +330,18 @@ class FileView(QTreeView):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.setTextElideMode(Qt.ElideMiddle)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.LeftButton and event.modifiers() & Qt.AltModifier:
+            index = self.indexAt(event.position().toPoint())
+            if index.isValid():
+                proxy = self.model()
+                entry = proxy.sourceModel().entry(proxy.mapToSource(index))
+                if entry and entry.folder:
+                    self.external_folder.emit(index)
+                    event.accept()
+                    return
+        super().mouseDoubleClickEvent(event)
 
     def startDrag(self, supported):
         indexes = self.selectionModel().selectedRows()
@@ -422,7 +451,8 @@ def create_table_pane(index, default_mode, settings, source_model, show_hidden, 
 
     column = settings.value(f"pane/{index}/sort_column", 0, type=int)
     descending = settings.value(f"pane/{index}/descending", False, type=bool)
-    view.sortByColumn(column if 0 <= column < source_model.columnCount() else 0,
+    view.sortByColumn(column if 0 <= column < source_model.columnCount() and
+                      (column != 4 or mode in ("folders", "empty_folders")) else 0,
                       Qt.DescendingOrder if descending else Qt.AscendingOrder)
     header = view.header()
     header.setSectionsMovable(True)
@@ -431,9 +461,11 @@ def create_table_pane(index, default_mode, settings, source_model, show_hidden, 
     header.resizeSection(1, 82)
     header.resizeSection(2, 78)
     header.resizeSection(3, 145)
+    header.resizeSection(4, 128)
+    view.setColumnHidden(4, mode not in ("folders", "empty_folders"))
     view.setToolTip(
         "Drag ZIP files to the opposite pane to extract and recycle the ZIP. "
-        "Drop on a folder to extract inside it."
+        "Drop on a folder to extract inside it. Alt+double-click a folder to open it in Windows Explorer."
     )
     layout.addWidget(view, 1)
     footer = QWidget()

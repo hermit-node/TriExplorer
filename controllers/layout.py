@@ -165,6 +165,7 @@ class LayoutMixin:
                 table.widget, table.view, table.proxy, table.count, table.selector
             )
             view.doubleClicked.connect(lambda idx, v=view: self.double_click_entry(v, idx))
+            view.external_folder.connect(lambda idx, v=view: self.double_click_entry(v, idx, external=True))
             view.clicked.connect(lambda _, v=view: self.set_active(v))
             view.selectionModel().selectionChanged.connect(
                 lambda *_args, v=view: self.selection_changed(v)
@@ -258,6 +259,9 @@ class LayoutMixin:
         mode = self.mode_selectors[i].currentData()
         proxy = self.proxies[i]
         proxy.set_mode(mode)
+        self.views[i].setColumnHidden(4, mode not in ("folders", "empty_folders"))
+        if mode not in ("folders", "empty_folders") and self.views[i].header().sortIndicatorSection() == 4:
+            self.views[i].sortByColumn(0, Qt.AscendingOrder)
         self.archive_footers[i].setVisible(mode == "archive_matches")
         if mode in ("alphabetical", "archive_matches"):
             self.views[i].sortByColumn(0, Qt.AscendingOrder)

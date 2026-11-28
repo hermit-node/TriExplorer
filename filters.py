@@ -3,6 +3,7 @@ PANE_MODES = (
     ("all", "All items"),
     ("alphabetical", "All items · A–Z"),
     ("folders", "Folders only"),
+    ("empty_folders", "Empty folders"),
     ("files", "Files only"),
     ("archives", "Compressed archives"),
     ("images", "Images"),

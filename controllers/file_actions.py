@@ -106,10 +106,14 @@ class FileActionsMixin:
             self.operation("Creating folder", lambda: os.mkdir(path))
 
 
-    def double_click_entry(self, view, index):
+    def double_click_entry(self, view, index, external=False):
         entry = self.model.entry(view.model().mapToSource(index))
         if entry and entry.folder:
-            self.open_entry(view, index)
+            if external:
+                if not self.editing() and not QDesktopServices.openUrl(QUrl.fromLocalFile(entry.path)):
+                    self.warn("Could not open " + entry.path)
+            else:
+                self.open_entry(view, index)
         elif entry:
             self.begin_rename(view, index)
 
@@ -240,7 +244,7 @@ class FileActionsMixin:
                             if old_key in values:
                                 values.discard(old_key)
                                 values.add(new_key)
-                    self.model.dataChanged.emit(self.model.index(row, 0), self.model.index(row, 3), [])
+                    self.model.dataChanged.emit(self.model.index(row, 0), self.model.index(row, self.model.columnCount()-1), [])
                     break
             self.next_rename()
 

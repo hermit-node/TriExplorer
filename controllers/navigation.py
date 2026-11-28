@@ -198,7 +198,7 @@ class NavigationMixin:
                 continue
             k = normalized(e.path)
             cached = self.model.folder_sizes.get(k)
-            if force or ((not cached or cached.stale) and k not in self.size_attempted):
+            if force or ((not cached or cached.stale or cached.items is None) and k not in self.size_attempted):
                 paths.append(e.path)
         if not paths:
             return
@@ -214,11 +214,18 @@ class NavigationMixin:
                 self.size_attempted.discard(path)
             else:
                 self.size_attempted.add(path)
+                cached = self.model.folder_sizes.get(path)
+                if cached is not None:
+                    from dataclasses import replace
+                    self.model.set_folder_size(path, replace(cached, stale=True))
+            if any(p.mode == "empty_folders" for p in self.proxies):
+                self.update_counts()
 
         def done(result, error):
             if self.size_job is not stop or stop.is_set():
                 return
             self.size_job = None
+            self.update_counts()
             if error:
                 self.statusBar().showMessage("Folder size cache: " + error)
             elif result:
@@ -272,6 +279,9 @@ class NavigationMixin:
                     label.setText(self.archive_match_progress or "ZIP / ISO / folder matches")
                 label.setToolTip(
                     "\n".join(self.archive_match_errors[:30]) or "Hover matched rows for verification details")
+            elif proxy.mode == "empty_folders":
+                label.setText(f"{proxy.rowCount():,} empty" + (" | Scanning..." if self.size_job else ""))
+                label.setToolTip("Only folders with a non-stale, verified zero immediate-child count are shown.")
             elif proxy.mode == "duplicates" and self.duplicate_job is not None:
                 label.setText(f"{proxy.rowCount():,} matches | {self.duplicate_progress or 'Scanning...'}")
                 label.setToolTip("Checking exact SHA-256 matches; results appear as groups finish")

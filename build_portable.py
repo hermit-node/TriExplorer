@@ -55,7 +55,7 @@ def build(version: str) -> Path:
         conn.execute(
             "CREATE TABLE folder_sizes "
             "(path TEXT PRIMARY KEY, bytes INTEGER NOT NULL, "
-            "checked REAL NOT NULL, modified REAL NOT NULL)"
+            "checked REAL NOT NULL, modified REAL NOT NULL, files INTEGER, directories INTEGER, other INTEGER)"
         )
         conn.execute(
             "CREATE TABLE sha_cache "
